@@ -1,0 +1,295 @@
+"""Data update coordinators for Anode Battery integration."""
+from __future__ import annotations
+
+from datetime import timedelta, datetime, time
+import logging
+from typing import Any
+import base64
+
+import aiohttp
+import async_timeout
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.const import CONF_EMAIL
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    DOMAIN,
+    API_BASE_URL,
+    API_TIMEOUT,
+    CONF_API_KEY,
+    CONF_HUB_ID,
+    CONF_STATUS_INTERVAL,
+    CONF_DEVICE_INTERVAL,
+    DEFAULT_STATUS_INTERVAL,
+    DEFAULT_DEVICE_INTERVAL,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class AnodeAPIClient:
+    """API client for Anode Battery."""
+
+    def __init__(self, hass: HomeAssistant, email: str, api_key: str, hub_id: str) -> None:
+        """Initialize the API client."""
+        self.hass = hass
+        self.email = email
+        self.api_key = api_key
+        self.hub_id = hub_id
+        self.session = async_get_clientsession(hass)
+
+        # Create Basic Auth header
+        credentials = f"{email}:{api_key}"
+        b64_credentials = base64.b64encode(credentials.encode()).decode()
+        self.headers = {
+            "Authorization": f"Basic {b64_credentials}",
+        }
+
+    async def _request(self, endpoint: str) -> dict[str, Any]:
+        """Make API request."""
+        url = f"{API_BASE_URL}{endpoint}"
+
+        try:
+            async with async_timeout.timeout(API_TIMEOUT):
+                async with self.session.get(url, headers=self.headers) as response:
+                    if response.status == 401:
+                        raise UpdateFailed("Authentication failed")
+                    if response.status == 408:
+                        raise UpdateFailed("Device timeout - may be offline")
+                    if response.status != 200:
+                        raise UpdateFailed(f"HTTP {response.status}")
+
+                    return await response.json()
+        except aiohttp.ClientError as err:
+            raise UpdateFailed(f"Connection error: {err}") from err
+        except TimeoutError as err:
+            raise UpdateFailed("Request timeout") from err
+
+    async def get_hub_status(self) -> dict[str, Any]:
+        """Get hub status including connected devices."""
+        return await self._request(f"/api/device/status/{self.hub_id}")
+
+    async def get_battery_details(self, battery_id: str | None = None) -> dict[str, Any]:
+        """Get battery details."""
+        endpoint = f"/api/device/battery/{self.hub_id}"
+        if battery_id:
+            endpoint += f"?id={battery_id}"
+        return await self._request(endpoint)
+
+    async def get_meter_details(self, meter_id: str | None = None) -> dict[str, Any]:
+        """Get meter details."""
+        endpoint = f"/api/device/meter/{self.hub_id}"
+        if meter_id:
+            endpoint += f"?id={meter_id}"
+        return await self._request(endpoint)
+
+    async def get_mode(self) -> str:
+        """Get current operating mode."""
+        data = await self._request(f"/api/device/{self.hub_id}/mode")
+        return data.get("mode", "UNKNOWN")
+
+    async def get_schedule(self) -> dict[str, Any]:
+        """Get schedule."""
+        return await self._request(f"/api/device/schedule/{self.hub_id}")
+
+    async def set_override(self, mode: str, timeout: int) -> dict[str, Any]:
+        """Set mode override."""
+        url = f"{API_BASE_URL}/api/device/{self.hub_id}/override?mode={mode}&timeout={timeout}"
+
+        try:
+            async with async_timeout.timeout(API_TIMEOUT):
+                async with self.session.put(url, headers=self.headers) as response:
+                    if response.status != 200:
+                        raise UpdateFailed(f"Override failed: HTTP {response.status}")
+                    return await response.json()
+        except aiohttp.ClientError as err:
+            raise UpdateFailed(f"Override error: {err}") from err
+
+
+class AnodeStatusCoordinator(DataUpdateCoordinator):
+    """Coordinator for hub status and device discovery."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api_client: AnodeAPIClient,
+        update_interval: int,
+    ) -> None:
+        """Initialize the coordinator."""
+        self.api_client = api_client
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_status",
+            update_interval=timedelta(seconds=update_interval),
+        )
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch hub status data."""
+        return await self.api_client.get_hub_status()
+
+
+class AnodeDeviceCoordinator(DataUpdateCoordinator):
+    """Coordinator for individual device data (batteries and meters)."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api_client: AnodeAPIClient,
+        update_interval: int,
+    ) -> None:
+        """Initialize the coordinator."""
+        self.api_client = api_client
+        self._battery_ids: list[str] = []
+        self._meter_ids: list[str] = []
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_devices",
+            update_interval=timedelta(seconds=update_interval),
+        )
+
+    def set_device_ids(self, battery_ids: list[str], meter_ids: list[str]) -> None:
+        """Update the list of devices to poll."""
+        self._battery_ids = battery_ids
+        self._meter_ids = meter_ids
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch device data for all batteries and meters."""
+        data: dict[str, Any] = {
+            "batteries": {},
+            "meters": {},
+        }
+
+        # Fetch battery data
+        for battery_id in self._battery_ids:
+            try:
+                battery_data = await self.api_client.get_battery_details(battery_id)
+                data["batteries"][battery_id] = battery_data
+            except UpdateFailed as err:
+                _LOGGER.warning("Failed to update battery %s: %s", battery_id, err)
+
+        # Fetch meter data
+        for meter_id in self._meter_ids:
+            try:
+                meter_data = await self.api_client.get_meter_details(meter_id)
+                data["meters"][meter_id] = meter_data
+            except UpdateFailed as err:
+                _LOGGER.warning("Failed to update meter %s: %s", meter_id, err)
+
+        return data
+
+
+class AnodeModeCoordinator(DataUpdateCoordinator):
+    """Coordinator for mode and schedule data with smart refresh."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api_client: AnodeAPIClient,
+    ) -> None:
+        """Initialize the coordinator."""
+        self.api_client = api_client
+        self._next_schedule_time: datetime | None = None
+
+        # Start with a reasonable interval, will be adjusted based on schedule
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_mode",
+            update_interval=timedelta(seconds=60),
+        )
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch mode and schedule data."""
+        mode = await self.api_client.get_mode()
+        schedule_data = await self.api_client.get_schedule()
+
+        # Calculate next schedule transition
+        next_mode, next_time = self._calculate_next_schedule(schedule_data.get("schedule", []))
+        self._next_schedule_time = next_time
+
+        # Adjust update interval based on next schedule time
+        self._adjust_update_interval(next_time)
+
+        return {
+            "mode": mode,
+            "schedule": schedule_data.get("schedule", []),
+            "next_mode": next_mode,
+            "next_time": next_time,
+        }
+
+    def _calculate_next_schedule(
+        self, schedule: list[dict[str, Any]]
+    ) -> tuple[str | None, datetime | None]:
+        """Calculate the next scheduled mode transition."""
+        if not schedule:
+            return None, None
+
+        now = dt_util.now()
+        current_time = now.time()
+        today_date = now.date()
+
+        # Convert schedule slots to datetime objects for today
+        transitions: list[tuple[datetime, str]] = []
+
+        for slot in schedule:
+            begin = slot.get("begin", {})
+            mode = slot.get("mode", "UNKNOWN")
+
+            begin_time = time(
+                hour=begin.get("hour", 0),
+                minute=begin.get("minute", 0),
+                second=begin.get("second", 0),
+            )
+            # Create timezone-aware datetime
+            begin_datetime = dt_util.as_local(datetime.combine(today_date, begin_time))
+
+            # If time has passed today, schedule for tomorrow
+            if begin_datetime <= now:
+                begin_datetime = dt_util.as_local(
+                    datetime.combine(today_date + timedelta(days=1), begin_time)
+                )
+
+            transitions.append((begin_datetime, mode))
+
+        # Sort by time and get the earliest
+        if transitions:
+            transitions.sort(key=lambda x: x[0])
+            next_time, next_mode = transitions[0]
+            return next_mode, next_time
+
+        return None, None
+
+    def _adjust_update_interval(self, next_time: datetime | None) -> None:
+        """Adjust update interval based on next schedule time."""
+        if next_time is None:
+            # No schedule, use default 5 minute interval
+            self.update_interval = timedelta(minutes=5)
+            return
+
+        now = dt_util.now()
+        time_until_transition = (next_time - now).total_seconds()
+
+        if time_until_transition < 60:
+            # Less than 1 minute away, update every 10 seconds
+            self.update_interval = timedelta(seconds=10)
+        elif time_until_transition < 300:
+            # Less than 5 minutes away, update every 30 seconds
+            self.update_interval = timedelta(seconds=30)
+        elif time_until_transition < 1800:
+            # Less than 30 minutes away, update every minute
+            self.update_interval = timedelta(minutes=1)
+        else:
+            # More than 30 minutes away, update every 5 minutes
+            self.update_interval = timedelta(minutes=5)
+
+    async def async_request_refresh_soon(self) -> None:
+        """Request a refresh soon (used after override changes)."""
+        # Force immediate refresh
+        await self.async_request_refresh()

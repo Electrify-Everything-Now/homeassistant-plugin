@@ -1,0 +1,12 @@
+{
+  "domain": "anode_battery",
+  "name": "Anode Battery",
+  "codeowners": ["@anode-energy"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/anode-energy/anode-ha",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}

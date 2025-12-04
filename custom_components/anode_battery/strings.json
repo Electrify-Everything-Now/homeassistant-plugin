@@ -1,0 +1,90 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Anode Battery",
+        "description": "Enter your Anode API credentials and Hub ID",
+        "data": {
+          "email": "Email",
+          "api_key": "API Key",
+          "hub_id": "Hub ID (Friendly ID)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Anode API",
+      "invalid_auth": "Invalid authentication credentials",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This hub is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Anode Battery Options",
+        "description": "Configure polling intervals",
+        "data": {
+          "status_update_interval": "Status update interval (seconds, min 10)",
+          "device_update_interval": "Device update interval (seconds, min 10)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "mode": {
+        "name": "Mode"
+      },
+      "version": {
+        "name": "Version"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "next_mode": {
+        "name": "Next Mode"
+      },
+      "next_mode_time": {
+        "name": "Next Mode Time"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "soc": {
+        "name": "State of Charge"
+      },
+      "type": {
+        "name": "Type"
+      },
+      "parent_meter": {
+        "name": "Parent Meter"
+      }
+    },
+    "binary_sensor": {
+      "online": {
+        "name": "Online"
+      }
+    },
+    "select": {
+      "charge_for": {
+        "name": "Charge Override"
+      },
+      "discharge_for": {
+        "name": "Discharge Override"
+      },
+      "idle_for": {
+        "name": "Idle Override"
+      },
+      "match_for": {
+        "name": "Match Override"
+      }
+    },
+    "button": {
+      "cancel_override": {
+        "name": "Cancel Override"
+      }
+    }
+  }
+}

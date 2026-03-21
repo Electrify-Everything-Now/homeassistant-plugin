@@ -364,6 +364,7 @@ class AnodeEnergyCoordinator(DataUpdateCoordinator):
         for battery_id in self._battery_ids:
             try:
                 result = await self.api_client.get_telemetry(battery_id, from_dt, now)
+                # Telemetry API already converts dWh→Wh internally; values are in Wh
                 data["batteries"][battery_id] = {
                     "import_wh": result.get("import", 0.0),
                     "export_wh": result.get("export", 0.0),
@@ -374,6 +375,7 @@ class AnodeEnergyCoordinator(DataUpdateCoordinator):
         for meter_id in self._meter_ids:
             try:
                 result = await self.api_client.get_telemetry(meter_id, from_dt, now)
+                # Telemetry API already converts dWh→Wh internally; values are in Wh
                 data["meters"][meter_id] = {
                     "import_wh": result.get("import", 0.0),
                     "export_wh": result.get("export", 0.0),

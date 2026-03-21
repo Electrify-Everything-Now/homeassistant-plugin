@@ -851,23 +851,15 @@ class AnodeMeterImportEnergySensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, meter_id)},
         )
 
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
     @property
     def native_value(self) -> float | None:
         meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
         if meter_data and "importEnergy" in meter_data:
-            return meter_data["importEnergy"].get("value")
+            # Raw meter API returns dWh; convert to kWh
+            return meter_data["importEnergy"].get("value", 0) / 10000
         return None
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
-        if meter_data and "importEnergy" in meter_data:
-            unit = meter_data["importEnergy"].get("unit", "kWh").lower()
-            if unit == "kwh":
-                return UnitOfEnergy.KILO_WATT_HOUR
-            if unit == "wh":
-                return UnitOfEnergy.WATT_HOUR
-        return UnitOfEnergy.KILO_WATT_HOUR
 
 
 class AnodeMeterExportEnergySensor(CoordinatorEntity, SensorEntity):
@@ -895,23 +887,15 @@ class AnodeMeterExportEnergySensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, meter_id)},
         )
 
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
     @property
     def native_value(self) -> float | None:
         meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
         if meter_data and "exportEnergy" in meter_data:
-            return meter_data["exportEnergy"].get("value")
+            # Raw meter API returns dWh; convert to kWh
+            return meter_data["exportEnergy"].get("value", 0) / 10000
         return None
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
-        if meter_data and "exportEnergy" in meter_data:
-            unit = meter_data["exportEnergy"].get("unit", "kWh").lower()
-            if unit == "kwh":
-                return UnitOfEnergy.KILO_WATT_HOUR
-            if unit == "wh":
-                return UnitOfEnergy.WATT_HOUR
-        return UnitOfEnergy.KILO_WATT_HOUR
 
 
 # ---------------------------------------------------------------------------
@@ -947,23 +931,15 @@ class AnodeHubGridImportEnergySensor(CoordinatorEntity, SensorEntity):
                 return self.coordinator.data.get("meters", {}).get(meter["id"])
         return None
 
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
     @property
     def native_value(self) -> float | None:
         data = self._get_primary_meter_data()
         if data and "importEnergy" in data:
-            return data["importEnergy"].get("value")
+            # Raw meter API returns dWh; convert to kWh
+            return data["importEnergy"].get("value", 0) / 10000
         return None
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        data = self._get_primary_meter_data()
-        if data and "importEnergy" in data:
-            unit = data["importEnergy"].get("unit", "kWh").lower()
-            if unit == "kwh":
-                return UnitOfEnergy.KILO_WATT_HOUR
-            if unit == "wh":
-                return UnitOfEnergy.WATT_HOUR
-        return UnitOfEnergy.KILO_WATT_HOUR
 
 
 class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
@@ -995,23 +971,15 @@ class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
                 return self.coordinator.data.get("meters", {}).get(meter["id"])
         return None
 
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
     @property
     def native_value(self) -> float | None:
         data = self._get_primary_meter_data()
         if data and "exportEnergy" in data:
-            return data["exportEnergy"].get("value")
+            # Raw meter API returns dWh; convert to kWh
+            return data["exportEnergy"].get("value", 0) / 10000
         return None
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        data = self._get_primary_meter_data()
-        if data and "exportEnergy" in data:
-            unit = data["exportEnergy"].get("unit", "kWh").lower()
-            if unit == "kwh":
-                return UnitOfEnergy.KILO_WATT_HOUR
-            if unit == "wh":
-                return UnitOfEnergy.WATT_HOUR
-        return UnitOfEnergy.KILO_WATT_HOUR
 
 
 # ---------------------------------------------------------------------------

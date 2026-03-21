@@ -177,7 +177,7 @@ class AnodeBatteryOnlineSensor(CoordinatorEntity, BinarySensorEntity):
         self._battery_id = battery_id
         self._hub_id = hub_id
         self._attr_unique_id = f"{battery_id}_online"
-        self._attr_name = f"Anode {battery_id} Online"
+        self._attr_name = f"Anode Battery {battery_id} Online"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
         )

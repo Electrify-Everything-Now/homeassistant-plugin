@@ -77,6 +77,12 @@ def mock_anode_api():
         api_instance.set_override = AsyncMock(return_value={
             "mode": "CHARGE"
         })
+        api_instance.get_telemetry = AsyncMock(return_value={
+            "import": 500.0,
+            "export": 200.0,
+        })
+        api_instance.get_config = AsyncMock(return_value={"config": []})
+        api_instance.set_config = AsyncMock(return_value={"status": True})
         yield api_instance
 
 

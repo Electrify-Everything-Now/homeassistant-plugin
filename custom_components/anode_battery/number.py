@@ -69,7 +69,7 @@ class AnodeBatteryMinSOCNumber(NumberEntity):
         self._hub_id = hub_id
         self._battery_id = battery_id
         self._attr_unique_id = f"{battery_id}_min_soc"
-        self._attr_name = f"Anode {battery_id} Min SOC"
+        self._attr_name = f"Anode Battery {battery_id} Min SOC"
         self._attr_native_value: float | None = None
         self._cached_max_soc: float = 100.0
         self._attr_device_info = DeviceInfo(
@@ -133,7 +133,7 @@ class AnodeBatteryMaxSOCNumber(NumberEntity):
         self._hub_id = hub_id
         self._battery_id = battery_id
         self._attr_unique_id = f"{battery_id}_max_soc"
-        self._attr_name = f"Anode {battery_id} Max SOC"
+        self._attr_name = f"Anode Battery {battery_id} Max SOC"
         self._attr_native_value: float | None = None
         self._cached_min_soc: float = 20.0
         self._attr_device_info = DeviceInfo(

@@ -1,4 +1,4 @@
-"""Test Anode Battery initialization."""
+"""Test Anode initialization."""
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntryState
 

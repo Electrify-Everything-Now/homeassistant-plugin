@@ -1,4 +1,4 @@
-"""Sensor platform for Anode Battery integration."""
+"""Sensor platform for Anode integration."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -38,7 +38,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Anode Battery sensors."""
+    """Set up Anode sensors."""
     hub_id = entry.data[CONF_HUB_ID]
     coordinators = hass.data[DOMAIN][entry.entry_id]
 
@@ -279,10 +279,10 @@ class AnodeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         self._hub_id = hub_id
         self._status_coordinator = status_coordinator
         self._attr_unique_id = f"{battery_id}_power"
-        self._attr_name = f"Anode Battery {battery_id} Power"
+        self._attr_name = f"Anode {battery_id} Power"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
-            name=f"Anode Battery {battery_id}",
+            name=f"Anode {battery_id}",
             manufacturer="Anode",
             model="Battery",
             via_device=(DOMAIN, hub_id),
@@ -330,7 +330,7 @@ class AnodeBatterySOCSensor(CoordinatorEntity, SensorEntity):
         self._battery_id = battery_id
         self._hub_id = hub_id
         self._attr_unique_id = f"{battery_id}_soc"
-        self._attr_name = f"Anode Battery {battery_id} State of Charge"
+        self._attr_name = f"Anode {battery_id} State of Charge"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
         )
@@ -367,7 +367,7 @@ class AnodeBatteryVersionSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._battery_id = battery_id
         self._attr_unique_id = f"{battery_id}_version"
-        self._attr_name = f"Anode Battery {battery_id} Version"
+        self._attr_name = f"Anode {battery_id} Version"
         self._attr_icon = "mdi:information"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
@@ -401,7 +401,7 @@ class AnodeBatteryUptimeSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._battery_id = battery_id
         self._attr_unique_id = f"{battery_id}_uptime"
-        self._attr_name = f"Anode Battery {battery_id} Uptime"
+        self._attr_name = f"Anode {battery_id} Uptime"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
         )
@@ -711,7 +711,7 @@ class AnodeBatteryChargeEnergySensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._battery_id = battery_id
         self._attr_unique_id = f"{battery_id}_charge_energy"
-        self._attr_name = f"Anode Battery {battery_id} Charge Energy"
+        self._attr_name = f"Anode {battery_id} Charge Energy"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
         )
@@ -745,7 +745,7 @@ class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._battery_id = battery_id
         self._attr_unique_id = f"{battery_id}_discharge_energy"
-        self._attr_name = f"Anode Battery {battery_id} Discharge Energy"
+        self._attr_name = f"Anode {battery_id} Discharge Energy"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
         )

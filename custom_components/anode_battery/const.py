@@ -1,4 +1,4 @@
-"""Constants for the Anode Battery integration."""
+"""Constants for the Anode integration."""
 from enum import StrEnum
 from typing import Final
 

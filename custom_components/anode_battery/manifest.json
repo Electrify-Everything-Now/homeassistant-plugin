@@ -1,6 +1,6 @@
 {
   "domain": "anode_battery",
-  "name": "Anode Battery",
+  "name": "Anode",
   "codeowners": ["@anode-energy"],
   "config_flow": true,
   "dependencies": [],

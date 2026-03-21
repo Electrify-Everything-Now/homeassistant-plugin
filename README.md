@@ -1,6 +1,6 @@
-# Anode Battery - Home Assistant Integration
+# Anode - Home Assistant Integration
 
-Home Assistant custom integration for Anode Battery systems.
+Home Assistant custom integration for Anode systems.
 
 ## Features
 
@@ -31,7 +31,7 @@ Home Assistant custom integration for Anode Battery systems.
 
 1. Go to Settings → Devices & Services
 2. Click "Add Integration"
-3. Search for "Anode Battery"
+3. Search for "Anode"
 4. Enter your credentials:
    - Email
    - API Key

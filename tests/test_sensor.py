@@ -1,4 +1,4 @@
-"""Test Anode Battery sensors."""
+"""Test Anode sensors."""
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 

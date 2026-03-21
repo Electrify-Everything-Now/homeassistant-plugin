@@ -1,4 +1,4 @@
-"""The Anode Battery integration."""
+"""The Anode integration."""
 from __future__ import annotations
 
 import logging
@@ -48,7 +48,7 @@ SERVICE_SET_OVERRIDE_SCHEMA = vol.Schema({
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Anode Battery from a config entry."""
+    """Set up Anode from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
     # Get configuration

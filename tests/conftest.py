@@ -1,4 +1,4 @@
-"""Fixtures for Anode Battery integration tests."""
+"""Fixtures for Anode integration tests."""
 from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
@@ -23,7 +23,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 def mock_anode_api():
     """Mock Anode API client."""
     with patch(
-        "custom_components.anode_battery.coordinator.AnodeAPIClient",
+        "custom_components.anode_battery.AnodeAPIClient",
         autospec=True,
     ) as mock_api:
         api_instance = mock_api.return_value
@@ -101,7 +101,7 @@ async def init_integration(
     mock_config_entry: MockConfigEntry,
     mock_anode_api,
 ) -> MockConfigEntry:
-    """Set up the Anode Battery integration for testing."""
+    """Set up the Anode integration for testing."""
     mock_config_entry.add_to_hass(hass)
 
     await hass.config_entries.async_setup(mock_config_entry.entry_id)

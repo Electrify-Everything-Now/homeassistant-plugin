@@ -1,4 +1,4 @@
-"""Data update coordinators for Anode Battery integration."""
+"""Data update coordinators for Anode integration."""
 from __future__ import annotations
 
 from datetime import timedelta, datetime, time
@@ -32,7 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class AnodeAPIClient:
-    """API client for Anode Battery."""
+    """API client for Anode."""
 
     def __init__(self, hass: HomeAssistant, email: str, api_key: str, hub_id: str) -> None:
         """Initialize the API client."""

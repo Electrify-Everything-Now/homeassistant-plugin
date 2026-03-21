@@ -13,6 +13,12 @@ from custom_components.anode_battery.const import DOMAIN, CONF_API_KEY, CONF_HUB
 from homeassistant.const import CONF_EMAIL
 
 
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Enable custom integrations for all tests."""
+    return enable_custom_integrations
+
+
 @pytest.fixture
 def mock_anode_api():
     """Mock Anode API client."""

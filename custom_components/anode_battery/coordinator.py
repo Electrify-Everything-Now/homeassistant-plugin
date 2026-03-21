@@ -156,7 +156,12 @@ class AnodeStatusCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch hub status data."""
-        return await self.api_client.get_hub_status()
+        try:
+            return await self.api_client.get_hub_status()
+        except UpdateFailed:
+            raise
+        except Exception as err:
+            raise UpdateFailed(f"Error fetching hub status: {err}") from err
 
 
 class AnodeDeviceCoordinator(DataUpdateCoordinator):

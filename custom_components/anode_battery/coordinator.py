@@ -6,8 +6,9 @@ import logging
 from typing import Any
 import base64
 
+import asyncio
+
 import aiohttp
-import async_timeout
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -53,7 +54,7 @@ class AnodeAPIClient:
         url = f"{API_BASE_URL}{endpoint}"
 
         try:
-            async with async_timeout.timeout(API_TIMEOUT):
+            async with asyncio.timeout(API_TIMEOUT):
                 async with self.session.get(url, headers=self.headers) as response:
                     if response.status == 401:
                         raise UpdateFailed("Authentication failed")
@@ -100,7 +101,7 @@ class AnodeAPIClient:
         url = f"{API_BASE_URL}/api/device/{self.hub_id}/override?mode={mode}&timeout={timeout}"
 
         try:
-            async with async_timeout.timeout(API_TIMEOUT):
+            async with asyncio.timeout(API_TIMEOUT):
                 async with self.session.put(url, headers=self.headers) as response:
                     if response.status != 200:
                         raise UpdateFailed(f"Override failed: HTTP {response.status}")
@@ -117,7 +118,7 @@ class AnodeAPIClient:
         url = f"{API_BASE_URL}/api/device/config/{self.hub_id}"
 
         try:
-            async with async_timeout.timeout(API_TIMEOUT):
+            async with asyncio.timeout(API_TIMEOUT):
                 async with self.session.put(url, headers=self.headers, json=config) as response:
                     if response.status != 200:
                         raise UpdateFailed(f"Config failed: HTTP {response.status}")

@@ -696,7 +696,7 @@ class AnodeBatteryChargeEnergySensor(CoordinatorEntity, SensorEntity):
     """Sensor for battery charge energy (import Wh over last hour)."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-charging"
 
@@ -725,12 +725,16 @@ class AnodeBatteryChargeEnergySensor(CoordinatorEntity, SensorEntity):
             return None
         return round(wh / 1000, 3)
 
+    @property
+    def last_reset(self):
+        return self.coordinator.data.get("window_start")
+
 
 class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
     """Sensor for battery discharge energy (export Wh over last hour)."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-minus"
 
@@ -759,12 +763,16 @@ class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
             return None
         return round(wh / 1000, 3)
 
+    @property
+    def last_reset(self):
+        return self.coordinator.data.get("window_start")
+
 
 class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
     """Sensor for total charge energy across all batteries (last hour)."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-charging"
 
@@ -790,12 +798,16 @@ class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
         total_wh = sum(d.get("import_wh", 0.0) for d in batteries.values())
         return round(total_wh / 1000, 3)
 
+    @property
+    def last_reset(self):
+        return self.coordinator.data.get("window_start")
+
 
 class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntity):
     """Sensor for total discharge energy across all batteries (last hour)."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-minus"
 
@@ -820,6 +832,10 @@ class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntit
             return None
         total_wh = sum(d.get("export_wh", 0.0) for d in batteries.values())
         return round(total_wh / 1000, 3)
+
+    @property
+    def last_reset(self):
+        return self.coordinator.data.get("window_start")
 
 
 # ---------------------------------------------------------------------------
@@ -990,7 +1006,7 @@ class AnodeHouseEnergyConsumedSensor(CoordinatorEntity, SensorEntity):
     """Derived house consumed energy over the last hour."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:home-lightning-bolt"
 
@@ -1055,12 +1071,16 @@ class AnodeHouseEnergyConsumedSensor(CoordinatorEntity, SensorEntity):
         consumed, _ = self._calc_house_energy()
         return consumed
 
+    @property
+    def last_reset(self):
+        return self.coordinator.data.get("window_start")
+
 
 class AnodeHouseEnergyGeneratedSensor(CoordinatorEntity, SensorEntity):
     """Derived house generated/exported energy over the last hour."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:solar-power"
 
@@ -1122,3 +1142,7 @@ class AnodeHouseEnergyGeneratedSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> float | None:
         _, generated = self._calc_house_energy()
         return generated
+
+    @property
+    def last_reset(self):
+        return self.coordinator.data.get("window_start")

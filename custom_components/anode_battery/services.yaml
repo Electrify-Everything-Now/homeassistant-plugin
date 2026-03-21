@@ -1,0 +1,33 @@
+set_override:
+  name: Set Override
+  description: Override the hub operating mode for a specified duration.
+  fields:
+    hub_id:
+      name: Hub ID
+      description: The friendly ID of the hub to override.
+      required: true
+      example: "abc123"
+      selector:
+        text:
+    mode:
+      name: Mode
+      description: Operating mode to override to.
+      required: true
+      example: "CHARGE"
+      selector:
+        select:
+          options:
+            - CHARGE
+            - DISCHARGE
+            - IDLE
+            - MATCH
+    duration:
+      name: Duration
+      description: Duration of the override in seconds. Use 0 to cancel an active override.
+      required: true
+      example: 3600
+      selector:
+        number:
+          min: 0
+          max: 86400
+          unit_of_measurement: seconds

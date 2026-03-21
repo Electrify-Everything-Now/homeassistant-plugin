@@ -50,6 +50,7 @@ OVERRIDE_TIME_OPTIONS: Final = {
     "30_min": 1800,
     "1_hour": 3600,
     "2_hours": 7200,
+    "3_hours": 10800,
     "4_hours": 14400,
 }
 
@@ -59,5 +60,6 @@ OVERRIDE_TIME_LABELS: Final = {
     "30_min": "30 minutes",
     "1_hour": "1 hour",
     "2_hours": "2 hours",
+    "3_hours": "3 hours",
     "4_hours": "4 hours",
 }

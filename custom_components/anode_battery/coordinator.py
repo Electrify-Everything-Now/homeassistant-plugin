@@ -359,6 +359,7 @@ class AnodeEnergyCoordinator(DataUpdateCoordinator):
         data: dict[str, Any] = {
             "batteries": {},
             "meters": {},
+            "window_start": from_dt,
         }
 
         for battery_id in self._battery_ids:

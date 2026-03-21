@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up Anode Battery",
+        "title": "Set up Anode",
         "description": "Enter your Anode API credentials and Hub ID",
         "data": {
           "email": "Email",
@@ -23,7 +23,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Anode Battery Options",
+        "title": "Anode Options",
         "description": "Configure polling intervals",
         "data": {
           "status_update_interval": "Status update interval (seconds, min 10)",

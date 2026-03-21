@@ -1,1 +1,1 @@
-"""Tests for Anode Battery integration."""
+"""Tests for Anode integration."""

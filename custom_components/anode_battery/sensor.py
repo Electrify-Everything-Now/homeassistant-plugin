@@ -1,4 +1,4 @@
-"""Sensor platform for Anode Battery integration."""
+"""Sensor platform for Anode integration."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    UnitOfEnergy,
     UnitOfPower,
     UnitOfTime,
 )
@@ -25,6 +26,7 @@ from .const import DOMAIN, CONF_HUB_ID
 from .coordinator import (
     AnodeStatusCoordinator,
     AnodeDeviceCoordinator,
+    AnodeEnergyCoordinator,
     AnodeModeCoordinator,
 )
 
@@ -36,12 +38,13 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Anode Battery sensors."""
+    """Set up Anode sensors."""
     hub_id = entry.data[CONF_HUB_ID]
     coordinators = hass.data[DOMAIN][entry.entry_id]
 
     status_coordinator: AnodeStatusCoordinator = coordinators["status_coordinator"]
     device_coordinator: AnodeDeviceCoordinator = coordinators["device_coordinator"]
+    energy_coordinator: AnodeEnergyCoordinator = coordinators["energy_coordinator"]
     mode_coordinator: AnodeModeCoordinator = coordinators["mode_coordinator"]
 
     entities: list[SensorEntity] = []
@@ -57,6 +60,8 @@ async def async_setup_entry(
 
     # Battery sensors
     status_data = status_coordinator.data
+    battery_ids = [b["id"] for b in status_data.get("battery", [])]
+
     for battery in status_data.get("battery", []):
         battery_id = battery["id"]
         entities.extend([
@@ -64,6 +69,15 @@ async def async_setup_entry(
             AnodeBatterySOCSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryVersionSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryUptimeSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryChargeEnergySensor(energy_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryDischargeEnergySensor(energy_coordinator, hub_id, battery_id, entry.entry_id),
+        ])
+
+    # Cumulative battery energy sensors (on hub device)
+    if battery_ids:
+        entities.extend([
+            AnodeBatteryCumulativeChargeEnergySensor(energy_coordinator, hub_id, entry.entry_id),
+            AnodeBatteryCumulativeDischargeEnergySensor(energy_coordinator, hub_id, entry.entry_id),
         ])
 
     # Meter sensors
@@ -86,6 +100,8 @@ async def async_setup_entry(
             AnodeMeterTypeSensor(status_coordinator, hub_id, meter_id, entry.entry_id),
             AnodeMeterVersionSensor(status_coordinator, hub_id, meter_id, entry.entry_id),
             AnodeMeterUptimeSensor(status_coordinator, hub_id, meter_id, entry.entry_id),
+            AnodeMeterImportEnergySensor(device_coordinator, status_coordinator, hub_id, meter_id, entry.entry_id),
+            AnodeMeterExportEnergySensor(device_coordinator, status_coordinator, hub_id, meter_id, entry.entry_id),
         ])
         # Add parent meter sensor if applicable
         if meter.get("parentMeter"):
@@ -93,13 +109,22 @@ async def async_setup_entry(
                 AnodeMeterParentSensor(status_coordinator, hub_id, meter_id, entry.entry_id)
             )
 
-    # Add house sensor if both PRIMARY and EXT_INVERTER are present
+    # Add grid energy sensors on hub device (duplicating PRIMARY meter)
+    if has_primary:
+        entities.extend([
+            AnodeHubGridImportEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
+            AnodeHubGridExportEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
+        ])
+
+    # Add house sensors if both PRIMARY and EXT_INVERTER are present
     _LOGGER.info("House sensor check: has_primary=%s, has_ext_inverter=%s", has_primary, has_ext_inverter)
     if has_primary and has_ext_inverter:
-        _LOGGER.info("Adding house power sensor for hub %s", hub_id)
-        entities.append(
-            AnodeHousePowerSensor(device_coordinator, status_coordinator, hub_id, entry.entry_id)
-        )
+        _LOGGER.info("Adding house power and energy sensors for hub %s", hub_id)
+        entities.extend([
+            AnodeHousePowerSensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
+            AnodeHouseEnergyConsumedSensor(energy_coordinator, status_coordinator, hub_id, entry.entry_id),
+            AnodeHouseEnergyGeneratedSensor(energy_coordinator, status_coordinator, hub_id, entry.entry_id),
+        ])
 
     async_add_entities(entities)
 
@@ -159,7 +184,6 @@ class AnodeHubUptimeSensor(CoordinatorEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.MILLISECONDS
-    _attr_suggested_unit_of_measurement = UnitOfTime.DAYS
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def __init__(
@@ -257,7 +281,7 @@ class AnodeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Anode Battery {battery_id} Power"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
-            name=f"Anode Battery {battery_id}",
+            name=f"Anode {battery_id}",
             manufacturer="Anode",
             model="Battery",
             via_device=(DOMAIN, hub_id),
@@ -662,3 +686,471 @@ class AnodeHousePowerSensor(CoordinatorEntity, SensorEntity):
             return unit
 
         return UnitOfPower.WATT
+
+
+# ---------------------------------------------------------------------------
+# Battery energy sensors (via telemetry API, 1-hour rolling window)
+# ---------------------------------------------------------------------------
+
+class AnodeBatteryChargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery charge energy (import Wh over last hour)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:battery-charging"
+
+    def __init__(
+        self,
+        coordinator: AnodeEnergyCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_charge_energy"
+        self._attr_name = f"Anode Battery {battery_id} Charge Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if data is None:
+            return None
+        wh = data.get("import_wh")
+        if wh is None:
+            return None
+        return round(wh / 1000, 3)
+
+
+class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery discharge energy (export Wh over last hour)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:battery-minus"
+
+    def __init__(
+        self,
+        coordinator: AnodeEnergyCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_discharge_energy"
+        self._attr_name = f"Anode Battery {battery_id} Discharge Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if data is None:
+            return None
+        wh = data.get("export_wh")
+        if wh is None:
+            return None
+        return round(wh / 1000, 3)
+
+
+class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for total charge energy across all batteries (last hour)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:battery-charging"
+
+    def __init__(
+        self,
+        coordinator: AnodeEnergyCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._attr_unique_id = f"{hub_id}_battery_cumulative_charge_energy"
+        self._attr_name = f"Anode Hub {hub_id} Battery Cumulative Charge Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, hub_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        batteries = self.coordinator.data.get("batteries", {})
+        if not batteries:
+            return None
+        total_wh = sum(d.get("import_wh", 0.0) for d in batteries.values())
+        return round(total_wh / 1000, 3)
+
+
+class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for total discharge energy across all batteries (last hour)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:battery-minus"
+
+    def __init__(
+        self,
+        coordinator: AnodeEnergyCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._attr_unique_id = f"{hub_id}_battery_cumulative_discharge_energy"
+        self._attr_name = f"Anode Hub {hub_id} Battery Cumulative Discharge Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, hub_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        batteries = self.coordinator.data.get("batteries", {})
+        if not batteries:
+            return None
+        total_wh = sum(d.get("export_wh", 0.0) for d in batteries.values())
+        return round(total_wh / 1000, 3)
+
+
+# ---------------------------------------------------------------------------
+# Meter energy sensors (hardware counters from device coordinator)
+# ---------------------------------------------------------------------------
+
+class AnodeMeterImportEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for meter import energy (hardware counter)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:transmission-tower-import"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
+        hub_id: str,
+        meter_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
+        self._attr_unique_id = f"{meter_id}_import_energy"
+        self._attr_name = f"Anode Meter {meter_id} Import Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, meter_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
+        if meter_data and "importEnergy" in meter_data:
+            return meter_data["importEnergy"].get("value")
+        return None
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
+        if meter_data and "importEnergy" in meter_data:
+            unit = meter_data["importEnergy"].get("unit", "kWh").lower()
+            if unit == "kwh":
+                return UnitOfEnergy.KILO_WATT_HOUR
+            if unit == "wh":
+                return UnitOfEnergy.WATT_HOUR
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+
+class AnodeMeterExportEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for meter export energy (hardware counter)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:transmission-tower-export"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
+        hub_id: str,
+        meter_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
+        self._attr_unique_id = f"{meter_id}_export_energy"
+        self._attr_name = f"Anode Meter {meter_id} Export Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, meter_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
+        if meter_data and "exportEnergy" in meter_data:
+            return meter_data["exportEnergy"].get("value")
+        return None
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
+        if meter_data and "exportEnergy" in meter_data:
+            unit = meter_data["exportEnergy"].get("unit", "kWh").lower()
+            if unit == "kwh":
+                return UnitOfEnergy.KILO_WATT_HOUR
+            if unit == "wh":
+                return UnitOfEnergy.WATT_HOUR
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+
+# ---------------------------------------------------------------------------
+# Grid meter energy sensors on hub device (duplicate of PRIMARY meter)
+# ---------------------------------------------------------------------------
+
+class AnodeHubGridImportEnergySensor(CoordinatorEntity, SensorEntity):
+    """Grid import energy sensor on hub device (mirrors PRIMARY meter)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:transmission-tower-import"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
+        self._attr_unique_id = f"{hub_id}_grid_import_energy"
+        self._attr_name = f"Anode Hub {hub_id} Grid Import Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, hub_id)},
+        )
+
+    def _get_primary_meter_data(self) -> dict | None:
+        for meter in self._status_coordinator.data.get("meter", []):
+            if meter.get("type") == "PRIMARY":
+                return self.coordinator.data.get("meters", {}).get(meter["id"])
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        data = self._get_primary_meter_data()
+        if data and "importEnergy" in data:
+            return data["importEnergy"].get("value")
+        return None
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        data = self._get_primary_meter_data()
+        if data and "importEnergy" in data:
+            unit = data["importEnergy"].get("unit", "kWh").lower()
+            if unit == "kwh":
+                return UnitOfEnergy.KILO_WATT_HOUR
+            if unit == "wh":
+                return UnitOfEnergy.WATT_HOUR
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+
+class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
+    """Grid export energy sensor on hub device (mirrors PRIMARY meter)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:transmission-tower-export"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
+        self._attr_unique_id = f"{hub_id}_grid_export_energy"
+        self._attr_name = f"Anode Hub {hub_id} Grid Export Energy"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, hub_id)},
+        )
+
+    def _get_primary_meter_data(self) -> dict | None:
+        for meter in self._status_coordinator.data.get("meter", []):
+            if meter.get("type") == "PRIMARY":
+                return self.coordinator.data.get("meters", {}).get(meter["id"])
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        data = self._get_primary_meter_data()
+        if data and "exportEnergy" in data:
+            return data["exportEnergy"].get("value")
+        return None
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        data = self._get_primary_meter_data()
+        if data and "exportEnergy" in data:
+            unit = data["exportEnergy"].get("unit", "kWh").lower()
+            if unit == "kwh":
+                return UnitOfEnergy.KILO_WATT_HOUR
+            if unit == "wh":
+                return UnitOfEnergy.WATT_HOUR
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+
+# ---------------------------------------------------------------------------
+# Derived house energy sensors (1-hour rolling window via energy coordinator)
+# ---------------------------------------------------------------------------
+
+class AnodeHouseEnergyConsumedSensor(CoordinatorEntity, SensorEntity):
+    """Derived house consumed energy over the last hour."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:home-lightning-bolt"
+
+    def __init__(
+        self,
+        coordinator: AnodeEnergyCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
+        self._attr_unique_id = f"{hub_id}_house_energy_consumed"
+        self._attr_name = f"Anode Hub {hub_id} House Energy Consumed"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, hub_id)},
+        )
+
+    def _calc_house_energy(self) -> tuple[float | None, float | None]:
+        """Return (consumed_kwh, generated_kwh) or (None, None)."""
+        primary_id = None
+        ext_inverter_id = None
+        for meter in self._status_coordinator.data.get("meter", []):
+            t = meter.get("type")
+            if t == "PRIMARY":
+                primary_id = meter["id"]
+            elif t == "EXT_INVERTER":
+                ext_inverter_id = meter["id"]
+
+        if not primary_id or not ext_inverter_id:
+            return None, None
+
+        meters = self.coordinator.data.get("meters", {})
+        primary = meters.get(primary_id)
+        ext_inv = meters.get(ext_inverter_id)
+        if not primary or not ext_inv:
+            return None, None
+
+        primary_import = primary.get("import_wh", 0.0)
+        primary_export = primary.get("export_wh", 0.0)
+        ext_import = ext_inv.get("import_wh", 0.0)
+        ext_export = ext_inv.get("export_wh", 0.0)
+
+        battery_ids = [b["id"] for b in self._status_coordinator.data.get("battery", [])]
+        batteries = self.coordinator.data.get("batteries", {})
+        batt_charge = sum(batteries.get(bid, {}).get("import_wh", 0.0) for bid in battery_ids)
+        batt_discharge = sum(batteries.get(bid, {}).get("export_wh", 0.0) for bid in battery_ids)
+
+        # House consumed = grid import + battery discharge - ext_inverter import
+        consumed_wh = primary_import + batt_discharge - ext_import - batt_charge
+        # House generated (surplus to grid) = ext_inverter export + battery charge - grid export - battery discharge
+        generated_wh = ext_export + batt_charge - primary_export - batt_discharge
+
+        return (
+            round(max(consumed_wh, 0.0) / 1000, 3),
+            round(max(generated_wh, 0.0) / 1000, 3),
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        consumed, _ = self._calc_house_energy()
+        return consumed
+
+
+class AnodeHouseEnergyGeneratedSensor(CoordinatorEntity, SensorEntity):
+    """Derived house generated/exported energy over the last hour."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:solar-power"
+
+    def __init__(
+        self,
+        coordinator: AnodeEnergyCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
+        self._attr_unique_id = f"{hub_id}_house_energy_generated"
+        self._attr_name = f"Anode Hub {hub_id} House Energy Generated"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, hub_id)},
+        )
+
+    def _calc_house_energy(self) -> tuple[float | None, float | None]:
+        """Return (consumed_kwh, generated_kwh) or (None, None)."""
+        primary_id = None
+        ext_inverter_id = None
+        for meter in self._status_coordinator.data.get("meter", []):
+            t = meter.get("type")
+            if t == "PRIMARY":
+                primary_id = meter["id"]
+            elif t == "EXT_INVERTER":
+                ext_inverter_id = meter["id"]
+
+        if not primary_id or not ext_inverter_id:
+            return None, None
+
+        meters = self.coordinator.data.get("meters", {})
+        primary = meters.get(primary_id)
+        ext_inv = meters.get(ext_inverter_id)
+        if not primary or not ext_inv:
+            return None, None
+
+        primary_import = primary.get("import_wh", 0.0)
+        primary_export = primary.get("export_wh", 0.0)
+        ext_import = ext_inv.get("import_wh", 0.0)
+        ext_export = ext_inv.get("export_wh", 0.0)
+
+        battery_ids = [b["id"] for b in self._status_coordinator.data.get("battery", [])]
+        batteries = self.coordinator.data.get("batteries", {})
+        batt_charge = sum(batteries.get(bid, {}).get("import_wh", 0.0) for bid in battery_ids)
+        batt_discharge = sum(batteries.get(bid, {}).get("export_wh", 0.0) for bid in battery_ids)
+
+        consumed_wh = primary_import + batt_discharge - ext_import - batt_charge
+        generated_wh = ext_export + batt_charge - primary_export - batt_discharge
+
+        return (
+            round(max(consumed_wh, 0.0) / 1000, 3),
+            round(max(generated_wh, 0.0) / 1000, 3),
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        _, generated = self._calc_house_energy()
+        return generated

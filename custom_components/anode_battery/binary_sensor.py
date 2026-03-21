@@ -1,4 +1,4 @@
-"""Binary sensor platform for Anode Battery integration."""
+"""Binary sensor platform for Anode integration."""
 from __future__ import annotations
 
 from datetime import time
@@ -26,7 +26,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Anode Battery binary sensors."""
+    """Set up Anode binary sensors."""
     hub_id = entry.data[CONF_HUB_ID]
     coordinators = hass.data[DOMAIN][entry.entry_id]
 

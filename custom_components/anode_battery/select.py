@@ -1,4 +1,4 @@
-"""Select platform for Anode Battery integration."""
+"""Select platform for Anode integration."""
 from __future__ import annotations
 
 import logging
@@ -29,7 +29,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Anode Battery select entities."""
+    """Set up Anode select entities."""
     hub_id = entry.data[CONF_HUB_ID]
     coordinators = hass.data[DOMAIN][entry.entry_id]
 

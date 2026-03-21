@@ -1,4 +1,4 @@
-"""Data update coordinators for Anode Battery integration."""
+"""Data update coordinators for Anode integration."""
 from __future__ import annotations
 
 from datetime import timedelta, datetime, time
@@ -6,8 +6,9 @@ import logging
 from typing import Any
 import base64
 
+import asyncio
+
 import aiohttp
-import async_timeout
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -31,7 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class AnodeAPIClient:
-    """API client for Anode Battery."""
+    """API client for Anode."""
 
     def __init__(self, hass: HomeAssistant, email: str, api_key: str, hub_id: str) -> None:
         """Initialize the API client."""
@@ -53,7 +54,7 @@ class AnodeAPIClient:
         url = f"{API_BASE_URL}{endpoint}"
 
         try:
-            async with async_timeout.timeout(API_TIMEOUT):
+            async with asyncio.timeout(API_TIMEOUT):
                 async with self.session.get(url, headers=self.headers) as response:
                     if response.status == 401:
                         raise UpdateFailed("Authentication failed")
@@ -100,13 +101,38 @@ class AnodeAPIClient:
         url = f"{API_BASE_URL}/api/device/{self.hub_id}/override?mode={mode}&timeout={timeout}"
 
         try:
-            async with async_timeout.timeout(API_TIMEOUT):
+            async with asyncio.timeout(API_TIMEOUT):
                 async with self.session.put(url, headers=self.headers) as response:
                     if response.status != 200:
                         raise UpdateFailed(f"Override failed: HTTP {response.status}")
                     return await response.json()
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Override error: {err}") from err
+
+    async def get_config(self, key: str) -> dict[str, Any]:
+        """Get configuration value."""
+        return await self._request(f"/api/device/config/{self.hub_id}/{key}")
+
+    async def set_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Set configuration values."""
+        url = f"{API_BASE_URL}/api/device/config/{self.hub_id}"
+
+        try:
+            async with asyncio.timeout(API_TIMEOUT):
+                async with self.session.put(url, headers=self.headers, json=config) as response:
+                    if response.status != 200:
+                        raise UpdateFailed(f"Config failed: HTTP {response.status}")
+                    return await response.json()
+        except aiohttp.ClientError as err:
+            raise UpdateFailed(f"Config error: {err}") from err
+
+    async def get_telemetry(self, device_id: str, from_dt: datetime, to_dt: datetime) -> dict[str, Any]:
+        """Get energy telemetry for a device over a time range."""
+        from_str = from_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        to_str = to_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        return await self._request(
+            f"/api/device/telemetry/{device_id}?from={from_str}&to={to_str}"
+        )
 
 
 class AnodeStatusCoordinator(DataUpdateCoordinator):
@@ -130,7 +156,12 @@ class AnodeStatusCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch hub status data."""
-        return await self.api_client.get_hub_status()
+        try:
+            return await self.api_client.get_hub_status()
+        except UpdateFailed:
+            raise
+        except Exception as err:
+            raise UpdateFailed(f"Error fetching hub status: {err}") from err
 
 
 class AnodeDeviceCoordinator(DataUpdateCoordinator):
@@ -293,3 +324,61 @@ class AnodeModeCoordinator(DataUpdateCoordinator):
         """Request a refresh soon (used after override changes)."""
         # Force immediate refresh
         await self.async_request_refresh()
+
+
+class AnodeEnergyCoordinator(DataUpdateCoordinator):
+    """Coordinator for energy telemetry (rolling 1-hour window)."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api_client: AnodeAPIClient,
+    ) -> None:
+        """Initialize the coordinator."""
+        self.api_client = api_client
+        self._battery_ids: list[str] = []
+        self._meter_ids: list[str] = []
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_energy",
+            update_interval=timedelta(seconds=60),
+        )
+
+    def set_device_ids(self, battery_ids: list[str], meter_ids: list[str]) -> None:
+        """Update the list of devices to poll."""
+        self._battery_ids = battery_ids
+        self._meter_ids = meter_ids
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch 1-hour rolling telemetry for all devices."""
+        now = dt_util.utcnow()
+        from_dt = now - timedelta(hours=1)
+
+        data: dict[str, Any] = {
+            "batteries": {},
+            "meters": {},
+        }
+
+        for battery_id in self._battery_ids:
+            try:
+                result = await self.api_client.get_telemetry(battery_id, from_dt, now)
+                data["batteries"][battery_id] = {
+                    "import_wh": result.get("import", 0.0),
+                    "export_wh": result.get("export", 0.0),
+                }
+            except UpdateFailed as err:
+                _LOGGER.debug("Failed to get energy telemetry for battery %s: %s", battery_id, err)
+
+        for meter_id in self._meter_ids:
+            try:
+                result = await self.api_client.get_telemetry(meter_id, from_dt, now)
+                data["meters"][meter_id] = {
+                    "import_wh": result.get("import", 0.0),
+                    "export_wh": result.get("export", 0.0),
+                }
+            except UpdateFailed as err:
+                _LOGGER.debug("Failed to get energy telemetry for meter %s: %s", meter_id, err)
+
+        return data

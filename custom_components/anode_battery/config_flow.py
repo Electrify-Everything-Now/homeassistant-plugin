@@ -1,4 +1,4 @@
-"""Config flow for Anode Battery integration."""
+"""Config flow for Anode integration."""
 from __future__ import annotations
 
 import logging
@@ -78,7 +78,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Anode Battery."""
+    """Handle a config flow for Anode."""
 
     VERSION = 1
 
@@ -133,7 +133,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow for Anode Battery."""
+    """Handle options flow for Anode."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""

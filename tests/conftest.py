@@ -1,4 +1,4 @@
-"""Fixtures for Anode Battery integration tests."""
+"""Fixtures for Anode integration tests."""
 from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
@@ -13,11 +13,17 @@ from custom_components.anode_battery.const import DOMAIN, CONF_API_KEY, CONF_HUB
 from homeassistant.const import CONF_EMAIL
 
 
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Enable custom integrations for all tests."""
+    return enable_custom_integrations
+
+
 @pytest.fixture
 def mock_anode_api():
     """Mock Anode API client."""
     with patch(
-        "custom_components.anode_battery.coordinator.AnodeAPIClient",
+        "custom_components.anode_battery.AnodeAPIClient",
         autospec=True,
     ) as mock_api:
         api_instance = mock_api.return_value
@@ -71,6 +77,12 @@ def mock_anode_api():
         api_instance.set_override = AsyncMock(return_value={
             "mode": "CHARGE"
         })
+        api_instance.get_telemetry = AsyncMock(return_value={
+            "import": 500.0,
+            "export": 200.0,
+        })
+        api_instance.get_config = AsyncMock(return_value={"config": []})
+        api_instance.set_config = AsyncMock(return_value={"status": True})
         yield api_instance
 
 
@@ -95,7 +107,7 @@ async def init_integration(
     mock_config_entry: MockConfigEntry,
     mock_anode_api,
 ) -> MockConfigEntry:
-    """Set up the Anode Battery integration for testing."""
+    """Set up the Anode integration for testing."""
     mock_config_entry.add_to_hass(hass)
 
     await hass.config_entries.async_setup(mock_config_entry.entry_id)

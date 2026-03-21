@@ -1,4 +1,4 @@
-"""Test the Anode Battery config flow."""
+"""Test the Anode config flow."""
 from unittest.mock import AsyncMock, patch
 
 import pytest

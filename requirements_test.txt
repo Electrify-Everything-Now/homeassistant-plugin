@@ -1,3 +1,2 @@
 # Testing requirements for Anode Battery integration
-pytest==7.4.3
 pytest-homeassistant-custom-component==0.13.106

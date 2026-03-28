@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfPower,
     UnitOfTime,
@@ -68,6 +69,9 @@ async def async_setup_entry(
         entities.extend([
             AnodeBatteryPowerSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatterySOCSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryCapacitySensor(device_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryCapacityRemainingSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryNominalVoltageSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryVersionSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryUptimeSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryChargeEnergySensor(energy_coordinator, hub_id, battery_id, entry.entry_id),
@@ -351,6 +355,107 @@ class AnodeBatterySOCSensor(CoordinatorEntity, SensorEntity):
             unit = battery_data["soc"].get("unit", "%")
             return unit
         return PERCENTAGE
+
+
+class AnodeBatteryCapacitySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery total capacity in Ah."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "Ah"
+    _attr_icon = "mdi:battery-heart-variant"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_capacity"
+        self._attr_name = f"Anode Battery {battery_id} Capacity"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the total capacity in Ah."""
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if battery_data and "capacity" in battery_data:
+            return battery_data["capacity"].get("value")
+        return None
+
+
+class AnodeBatteryCapacityRemainingSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery remaining capacity in Ah (capacity * SOC)."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "Ah"
+    _attr_icon = "mdi:battery-clock"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_capacity_remaining"
+        self._attr_name = f"Anode Battery {battery_id} Capacity Remaining"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the remaining capacity in Ah."""
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if not battery_data:
+            return None
+        capacity = battery_data.get("capacity", {}).get("value")
+        soc = battery_data.get("soc", {}).get("value")
+        if capacity is not None and soc is not None:
+            return round(capacity * soc / 100, 2)
+        return None
+
+
+class AnodeBatteryNominalVoltageSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery nominal voltage."""
+
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_icon = "mdi:flash"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_nominal_voltage"
+        self._attr_name = f"Anode Battery {battery_id} Nominal Voltage"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the nominal voltage."""
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if battery_data and "capacity" in battery_data:
+            return battery_data["capacity"].get("nominalVoltage")
+        return None
 
 
 class AnodeBatteryVersionSensor(CoordinatorEntity, SensorEntity):

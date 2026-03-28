@@ -67,6 +67,8 @@ async def async_setup_entry(
         battery_id = battery["id"]
         entities.extend([
             AnodeBatteryPowerSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryImportPowerSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryExportPowerSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatterySOCSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryVersionSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryUptimeSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
@@ -98,6 +100,8 @@ async def async_setup_entry(
 
         entities.extend([
             AnodeMeterPowerSensor(device_coordinator, status_coordinator, hub_id, meter_id, entry.entry_id),
+            AnodeMeterImportPowerSensor(device_coordinator, hub_id, meter_id, entry.entry_id),
+            AnodeMeterExportPowerSensor(device_coordinator, hub_id, meter_id, entry.entry_id),
             AnodeMeterTypeSensor(status_coordinator, hub_id, meter_id, entry.entry_id),
             AnodeMeterVersionSensor(status_coordinator, hub_id, meter_id, entry.entry_id),
             AnodeMeterUptimeSensor(status_coordinator, hub_id, meter_id, entry.entry_id),
@@ -311,6 +315,72 @@ class AnodeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         return UnitOfPower.WATT
 
 
+class AnodeBatteryImportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery import (charging) power."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:battery-charging"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_import_power"
+        self._attr_name = f"Anode Battery {battery_id} Import Power"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if battery_data and "power" in battery_data:
+            value = battery_data["power"].get("value")
+            if value is not None:
+                return max(value, 0)
+        return None
+
+
+class AnodeBatteryExportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery export (discharging) power."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:battery-minus"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_export_power"
+        self._attr_name = f"Anode Battery {battery_id} Export Power"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if battery_data and "power" in battery_data:
+            value = battery_data["power"].get("value")
+            if value is not None:
+                return abs(min(value, 0))
+        return None
+
+
 class AnodeBatterySOCSensor(CoordinatorEntity, SensorEntity):
     """Sensor for battery state of charge."""
 
@@ -465,6 +535,72 @@ class AnodeMeterPowerSensor(CoordinatorEntity, SensorEntity):
                 return UnitOfPower.KILO_WATT
             return unit
         return UnitOfPower.WATT
+
+
+class AnodeMeterImportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for meter import power."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:transmission-tower-import"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        meter_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._attr_unique_id = f"{meter_id}_import_power"
+        self._attr_name = f"Anode Meter {meter_id} Import Power"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, meter_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
+        if meter_data and "power" in meter_data:
+            value = meter_data["power"].get("value")
+            if value is not None:
+                return max(value, 0)
+        return None
+
+
+class AnodeMeterExportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for meter export power."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:transmission-tower-export"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        meter_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._attr_unique_id = f"{meter_id}_export_power"
+        self._attr_name = f"Anode Meter {meter_id} Export Power"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, meter_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        meter_data = self.coordinator.data.get("meters", {}).get(self._meter_id)
+        if meter_data and "power" in meter_data:
+            value = meter_data["power"].get("value")
+            if value is not None:
+                return abs(min(value, 0))
+        return None
 
 
 class AnodeMeterTypeSensor(CoordinatorEntity, SensorEntity):

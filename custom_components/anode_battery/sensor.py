@@ -17,10 +17,11 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, CONF_HUB_ID
 from .coordinator import (
@@ -689,15 +690,61 @@ class AnodeHousePowerSensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Battery energy sensors (via telemetry API, 1-hour rolling window)
+# Battery energy sensors (cumulative via telemetry API deltas)
 # ---------------------------------------------------------------------------
 
-class AnodeBatteryChargeEnergySensor(CoordinatorEntity, SensorEntity):
-    """Sensor for battery charge energy (import Wh over last hour)."""
+
+class _CumulativeEnergySensorBase(CoordinatorEntity, RestoreEntity, SensorEntity):
+    """Base for energy sensors that accumulate deltas into a running total."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(self, coordinator, **kwargs):
+        super().__init__(coordinator)
+        self._cumulative_kwh: float = 0.0
+        self._restored: bool = False
+
+    async def async_added_to_hass(self) -> None:
+        """Restore cumulative total from previous HA session."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+            try:
+                self._cumulative_kwh = float(last_state.state)
+            except (ValueError, TypeError):
+                self._cumulative_kwh = 0.0
+        self._restored = True
+        # Accumulate the initial coordinator data if already available
+        delta = self._get_delta_kwh()
+        if delta is not None and delta > 0:
+            self._cumulative_kwh += delta
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Accumulate delta on each coordinator update, then write state."""
+        if self._restored:
+            delta = self._get_delta_kwh()
+            if delta is not None and delta > 0:
+                self._cumulative_kwh += delta
+        super()._handle_coordinator_update()
+
+    def _get_delta_kwh(self) -> float | None:
+        """Subclasses return the current delta in kWh from coordinator data."""
+        raise NotImplementedError
+
+    @property
+    def native_value(self) -> float | None:
+        if not self._restored:
+            return None
+        return round(self._cumulative_kwh, 3)
+
+
+class AnodeBatteryChargeEnergySensor(_CumulativeEnergySensorBase):
+    """Sensor for battery charge energy (cumulative)."""
+
     _attr_icon = "mdi:battery-charging"
 
     def __init__(
@@ -715,27 +762,19 @@ class AnodeBatteryChargeEnergySensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, battery_id)},
         )
 
-    @property
-    def native_value(self) -> float | None:
+    def _get_delta_kwh(self) -> float | None:
         data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
         if data is None:
             return None
         wh = data.get("import_wh")
         if wh is None:
             return None
-        return round(wh / 1000, 3)
-
-    @property
-    def last_reset(self):
-        return self.coordinator.data.get("window_start")
+        return wh / 1000
 
 
-class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
-    """Sensor for battery discharge energy (export Wh over last hour)."""
+class AnodeBatteryDischargeEnergySensor(_CumulativeEnergySensorBase):
+    """Sensor for battery discharge energy (cumulative)."""
 
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-minus"
 
     def __init__(
@@ -753,27 +792,19 @@ class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, battery_id)},
         )
 
-    @property
-    def native_value(self) -> float | None:
+    def _get_delta_kwh(self) -> float | None:
         data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
         if data is None:
             return None
         wh = data.get("export_wh")
         if wh is None:
             return None
-        return round(wh / 1000, 3)
-
-    @property
-    def last_reset(self):
-        return self.coordinator.data.get("window_start")
+        return wh / 1000
 
 
-class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
-    """Sensor for total charge energy across all batteries (last hour)."""
+class AnodeBatteryCumulativeChargeEnergySensor(_CumulativeEnergySensorBase):
+    """Sensor for total charge energy across all batteries (cumulative)."""
 
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-charging"
 
     def __init__(
@@ -790,25 +821,17 @@ class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, hub_id)},
         )
 
-    @property
-    def native_value(self) -> float | None:
+    def _get_delta_kwh(self) -> float | None:
         batteries = self.coordinator.data.get("batteries", {})
         if not batteries:
             return None
         total_wh = sum(d.get("import_wh", 0.0) for d in batteries.values())
-        return round(total_wh / 1000, 3)
-
-    @property
-    def last_reset(self):
-        return self.coordinator.data.get("window_start")
+        return total_wh / 1000
 
 
-class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntity):
-    """Sensor for total discharge energy across all batteries (last hour)."""
+class AnodeBatteryCumulativeDischargeEnergySensor(_CumulativeEnergySensorBase):
+    """Sensor for total discharge energy across all batteries (cumulative)."""
 
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-minus"
 
     def __init__(
@@ -825,17 +848,12 @@ class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntit
             identifiers={(DOMAIN, hub_id)},
         )
 
-    @property
-    def native_value(self) -> float | None:
+    def _get_delta_kwh(self) -> float | None:
         batteries = self.coordinator.data.get("batteries", {})
         if not batteries:
             return None
         total_wh = sum(d.get("export_wh", 0.0) for d in batteries.values())
-        return round(total_wh / 1000, 3)
-
-    @property
-    def last_reset(self):
-        return self.coordinator.data.get("window_start")
+        return total_wh / 1000
 
 
 # ---------------------------------------------------------------------------
@@ -999,15 +1017,57 @@ class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Derived house energy sensors (1-hour rolling window via energy coordinator)
+# Derived house energy sensors (cumulative via energy coordinator deltas)
 # ---------------------------------------------------------------------------
 
-class AnodeHouseEnergyConsumedSensor(CoordinatorEntity, SensorEntity):
-    """Derived house consumed energy over the last hour."""
 
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+def _calc_house_energy_delta(
+    coordinator: AnodeEnergyCoordinator,
+    status_coordinator: AnodeStatusCoordinator,
+) -> tuple[float | None, float | None]:
+    """Return (consumed_kwh, generated_kwh) delta or (None, None)."""
+    primary_id = None
+    ext_inverter_id = None
+    for meter in status_coordinator.data.get("meter", []):
+        t = meter.get("type")
+        if t == "PRIMARY":
+            primary_id = meter["id"]
+        elif t == "EXT_INVERTER":
+            ext_inverter_id = meter["id"]
+
+    if not primary_id or not ext_inverter_id:
+        return None, None
+
+    meters = coordinator.data.get("meters", {})
+    primary = meters.get(primary_id)
+    ext_inv = meters.get(ext_inverter_id)
+    if not primary or not ext_inv:
+        return None, None
+
+    primary_import = primary.get("import_wh", 0.0)
+    primary_export = primary.get("export_wh", 0.0)
+    ext_import = ext_inv.get("import_wh", 0.0)
+    ext_export = ext_inv.get("export_wh", 0.0)
+
+    battery_ids = [b["id"] for b in status_coordinator.data.get("battery", [])]
+    batteries = coordinator.data.get("batteries", {})
+    batt_charge = sum(batteries.get(bid, {}).get("import_wh", 0.0) for bid in battery_ids)
+    batt_discharge = sum(batteries.get(bid, {}).get("export_wh", 0.0) for bid in battery_ids)
+
+    # House consumed = grid import + battery discharge - ext_inverter import
+    consumed_wh = primary_import + batt_discharge - ext_import - batt_charge
+    # House generated (surplus to grid) = ext_inverter export + battery charge - grid export - battery discharge
+    generated_wh = ext_export + batt_charge - primary_export - batt_discharge
+
+    return (
+        max(consumed_wh, 0.0) / 1000,
+        max(generated_wh, 0.0) / 1000,
+    )
+
+
+class AnodeHouseEnergyConsumedSensor(_CumulativeEnergySensorBase):
+    """Derived cumulative house consumed energy."""
+
     _attr_icon = "mdi:home-lightning-bolt"
 
     def __init__(
@@ -1026,62 +1086,14 @@ class AnodeHouseEnergyConsumedSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, hub_id)},
         )
 
-    def _calc_house_energy(self) -> tuple[float | None, float | None]:
-        """Return (consumed_kwh, generated_kwh) or (None, None)."""
-        primary_id = None
-        ext_inverter_id = None
-        for meter in self._status_coordinator.data.get("meter", []):
-            t = meter.get("type")
-            if t == "PRIMARY":
-                primary_id = meter["id"]
-            elif t == "EXT_INVERTER":
-                ext_inverter_id = meter["id"]
-
-        if not primary_id or not ext_inverter_id:
-            return None, None
-
-        meters = self.coordinator.data.get("meters", {})
-        primary = meters.get(primary_id)
-        ext_inv = meters.get(ext_inverter_id)
-        if not primary or not ext_inv:
-            return None, None
-
-        primary_import = primary.get("import_wh", 0.0)
-        primary_export = primary.get("export_wh", 0.0)
-        ext_import = ext_inv.get("import_wh", 0.0)
-        ext_export = ext_inv.get("export_wh", 0.0)
-
-        battery_ids = [b["id"] for b in self._status_coordinator.data.get("battery", [])]
-        batteries = self.coordinator.data.get("batteries", {})
-        batt_charge = sum(batteries.get(bid, {}).get("import_wh", 0.0) for bid in battery_ids)
-        batt_discharge = sum(batteries.get(bid, {}).get("export_wh", 0.0) for bid in battery_ids)
-
-        # House consumed = grid import + battery discharge - ext_inverter import
-        consumed_wh = primary_import + batt_discharge - ext_import - batt_charge
-        # House generated (surplus to grid) = ext_inverter export + battery charge - grid export - battery discharge
-        generated_wh = ext_export + batt_charge - primary_export - batt_discharge
-
-        return (
-            round(max(consumed_wh, 0.0) / 1000, 3),
-            round(max(generated_wh, 0.0) / 1000, 3),
-        )
-
-    @property
-    def native_value(self) -> float | None:
-        consumed, _ = self._calc_house_energy()
+    def _get_delta_kwh(self) -> float | None:
+        consumed, _ = _calc_house_energy_delta(self.coordinator, self._status_coordinator)
         return consumed
 
-    @property
-    def last_reset(self):
-        return self.coordinator.data.get("window_start")
 
+class AnodeHouseEnergyGeneratedSensor(_CumulativeEnergySensorBase):
+    """Derived cumulative house generated/exported energy."""
 
-class AnodeHouseEnergyGeneratedSensor(CoordinatorEntity, SensorEntity):
-    """Derived house generated/exported energy over the last hour."""
-
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:solar-power"
 
     def __init__(
@@ -1100,49 +1112,6 @@ class AnodeHouseEnergyGeneratedSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, hub_id)},
         )
 
-    def _calc_house_energy(self) -> tuple[float | None, float | None]:
-        """Return (consumed_kwh, generated_kwh) or (None, None)."""
-        primary_id = None
-        ext_inverter_id = None
-        for meter in self._status_coordinator.data.get("meter", []):
-            t = meter.get("type")
-            if t == "PRIMARY":
-                primary_id = meter["id"]
-            elif t == "EXT_INVERTER":
-                ext_inverter_id = meter["id"]
-
-        if not primary_id or not ext_inverter_id:
-            return None, None
-
-        meters = self.coordinator.data.get("meters", {})
-        primary = meters.get(primary_id)
-        ext_inv = meters.get(ext_inverter_id)
-        if not primary or not ext_inv:
-            return None, None
-
-        primary_import = primary.get("import_wh", 0.0)
-        primary_export = primary.get("export_wh", 0.0)
-        ext_import = ext_inv.get("import_wh", 0.0)
-        ext_export = ext_inv.get("export_wh", 0.0)
-
-        battery_ids = [b["id"] for b in self._status_coordinator.data.get("battery", [])]
-        batteries = self.coordinator.data.get("batteries", {})
-        batt_charge = sum(batteries.get(bid, {}).get("import_wh", 0.0) for bid in battery_ids)
-        batt_discharge = sum(batteries.get(bid, {}).get("export_wh", 0.0) for bid in battery_ids)
-
-        consumed_wh = primary_import + batt_discharge - ext_import - batt_charge
-        generated_wh = ext_export + batt_charge - primary_export - batt_discharge
-
-        return (
-            round(max(consumed_wh, 0.0) / 1000, 3),
-            round(max(generated_wh, 0.0) / 1000, 3),
-        )
-
-    @property
-    def native_value(self) -> float | None:
-        _, generated = self._calc_house_energy()
+    def _get_delta_kwh(self) -> float | None:
+        _, generated = _calc_house_energy_delta(self.coordinator, self._status_coordinator)
         return generated
-
-    @property
-    def last_reset(self):
-        return self.coordinator.data.get("window_start")

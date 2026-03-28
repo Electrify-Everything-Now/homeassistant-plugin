@@ -327,7 +327,7 @@ class AnodeModeCoordinator(DataUpdateCoordinator):
 
 
 class AnodeEnergyCoordinator(DataUpdateCoordinator):
-    """Coordinator for energy telemetry (rolling 1-hour window)."""
+    """Coordinator for energy telemetry (delta since last update)."""
 
     def __init__(
         self,
@@ -338,6 +338,7 @@ class AnodeEnergyCoordinator(DataUpdateCoordinator):
         self.api_client = api_client
         self._battery_ids: list[str] = []
         self._meter_ids: list[str] = []
+        self._last_update_time: datetime | None = None
 
         super().__init__(
             hass,
@@ -352,14 +353,21 @@ class AnodeEnergyCoordinator(DataUpdateCoordinator):
         self._meter_ids = meter_ids
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch 1-hour rolling telemetry for all devices."""
+        """Fetch energy telemetry delta since last successful update."""
         now = dt_util.utcnow()
-        from_dt = now - timedelta(hours=1)
+
+        if self._last_update_time is None:
+            # First run: use a short lookback to seed initial delta
+            from_dt = now - timedelta(minutes=5)
+        else:
+            from_dt = self._last_update_time
+            # Clamp to API max of 24 hours
+            if (now - from_dt) > timedelta(hours=24):
+                from_dt = now - timedelta(hours=24)
 
         data: dict[str, Any] = {
             "batteries": {},
             "meters": {},
-            "window_start": from_dt,
         }
 
         for battery_id in self._battery_ids:
@@ -384,4 +392,5 @@ class AnodeEnergyCoordinator(DataUpdateCoordinator):
             except UpdateFailed as err:
                 _LOGGER.debug("Failed to get energy telemetry for meter %s: %s", meter_id, err)
 
+        self._last_update_time = now
         return data

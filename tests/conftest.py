@@ -58,7 +58,11 @@ def mock_anode_api():
         })
         api_instance.get_battery_details = AsyncMock(return_value={
             "power": {"value": 1500.0, "unit": "W"},
+            "powerStatus": "CHARGING",
             "soc": {"value": 75.0, "unit": "%"},
+            "capacity": {"value": 136, "nominalVoltage": 44.4, "calibrated": True},
+            "importEnergy": {"value": 9226910, "unit": "dWh"},
+            "exportEnergy": {"value": 7304280, "unit": "dWh"},
         })
         api_instance.get_meter_details = AsyncMock(return_value={
             "power": {"value": 2000.0, "unit": "W"},

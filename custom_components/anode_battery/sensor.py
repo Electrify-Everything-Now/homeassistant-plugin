@@ -76,15 +76,16 @@ async def async_setup_entry(
             AnodeBatteryNominalVoltageSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryVersionSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryUptimeSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
-            AnodeBatteryChargeEnergySensor(energy_coordinator, hub_id, battery_id, entry.entry_id),
-            AnodeBatteryDischargeEnergySensor(energy_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryPowerStatusSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryChargeEnergySensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryDischargeEnergySensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
         ])
 
     # Cumulative battery energy sensors (on hub device)
     if battery_ids:
         entities.extend([
-            AnodeBatteryCumulativeChargeEnergySensor(energy_coordinator, hub_id, entry.entry_id),
-            AnodeBatteryCumulativeDischargeEnergySensor(energy_coordinator, hub_id, entry.entry_id),
+            AnodeBatteryCumulativeChargeEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
+            AnodeBatteryCumulativeDischargeEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
         ])
 
     # Meter sensors
@@ -590,6 +591,39 @@ class AnodeBatteryUptimeSensor(CoordinatorEntity, SensorEntity):
         return None
 
 
+class AnodeBatteryPowerStatusSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery power status (CHARGING, DISCHARGING, etc.)."""
+
+    _attr_icon = "mdi:battery-sync"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
+        self._attr_unique_id = f"{battery_id}_power_status"
+        self._attr_name = f"Anode Battery {battery_id} Power Status"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the power status."""
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if battery_data:
+            return battery_data.get("powerStatus")
+        return None
+
+
 class AnodeMeterPowerSensor(CoordinatorEntity, SensorEntity):
     """Sensor for meter power."""
 
@@ -931,7 +965,7 @@ class AnodeHousePowerSensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Battery energy sensors (cumulative via telemetry API deltas)
+# Battery energy sensors (hardware counters from device coordinator)
 # ---------------------------------------------------------------------------
 
 
@@ -983,118 +1017,144 @@ class _CumulativeEnergySensorBase(CoordinatorEntity, RestoreEntity, SensorEntity
         return round(self._cumulative_kwh, 3)
 
 
-class AnodeBatteryChargeEnergySensor(_CumulativeEnergySensorBase):
-    """Sensor for battery charge energy (cumulative)."""
+class AnodeBatteryChargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery charge energy (hardware counter)."""
 
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-charging"
 
     def __init__(
         self,
-        coordinator: AnodeEnergyCoordinator,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
         hub_id: str,
         battery_id: str,
         entry_id: str,
     ) -> None:
         super().__init__(coordinator)
         self._battery_id = battery_id
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
         self._attr_unique_id = f"{battery_id}_charge_energy"
         self._attr_name = f"Anode Battery {battery_id} Charge Energy"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
         )
 
-    def _get_delta_kwh(self) -> float | None:
-        data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
-        if data is None:
-            return None
-        wh = data.get("import_wh")
-        if wh is None:
-            return None
-        return wh / 1000
+    @property
+    def native_value(self) -> float | None:
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if battery_data and "importEnergy" in battery_data:
+            return battery_data["importEnergy"].get("value", 0) / 10000
+        return None
 
 
-class AnodeBatteryDischargeEnergySensor(_CumulativeEnergySensorBase):
-    """Sensor for battery discharge energy (cumulative)."""
+class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery discharge energy (hardware counter)."""
 
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-minus"
 
     def __init__(
         self,
-        coordinator: AnodeEnergyCoordinator,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
         hub_id: str,
         battery_id: str,
         entry_id: str,
     ) -> None:
         super().__init__(coordinator)
         self._battery_id = battery_id
+        self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
         self._attr_unique_id = f"{battery_id}_discharge_energy"
         self._attr_name = f"Anode Battery {battery_id} Discharge Energy"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
         )
 
-    def _get_delta_kwh(self) -> float | None:
-        data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
-        if data is None:
-            return None
-        wh = data.get("export_wh")
-        if wh is None:
-            return None
-        return wh / 1000
+    @property
+    def native_value(self) -> float | None:
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        if battery_data and "exportEnergy" in battery_data:
+            return battery_data["exportEnergy"].get("value", 0) / 10000
+        return None
 
 
-class AnodeBatteryCumulativeChargeEnergySensor(_CumulativeEnergySensorBase):
-    """Sensor for total charge energy across all batteries (cumulative)."""
+class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for total charge energy across all batteries (hardware counter)."""
 
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-charging"
 
     def __init__(
         self,
-        coordinator: AnodeEnergyCoordinator,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
         hub_id: str,
         entry_id: str,
     ) -> None:
         super().__init__(coordinator)
         self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
         self._attr_unique_id = f"{hub_id}_battery_cumulative_charge_energy"
         self._attr_name = f"Anode Hub {hub_id} Battery Cumulative Charge Energy"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hub_id)},
         )
 
-    def _get_delta_kwh(self) -> float | None:
+    @property
+    def native_value(self) -> float | None:
         batteries = self.coordinator.data.get("batteries", {})
         if not batteries:
             return None
-        total_wh = sum(d.get("import_wh", 0.0) for d in batteries.values())
-        return total_wh / 1000
+        total = sum(
+            b.get("importEnergy", {}).get("value", 0)
+            for b in batteries.values()
+        )
+        return total / 10000
 
 
-class AnodeBatteryCumulativeDischargeEnergySensor(_CumulativeEnergySensorBase):
-    """Sensor for total discharge energy across all batteries (cumulative)."""
+class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for total discharge energy across all batteries (hardware counter)."""
 
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:battery-minus"
 
     def __init__(
         self,
-        coordinator: AnodeEnergyCoordinator,
+        coordinator: AnodeDeviceCoordinator,
+        status_coordinator: AnodeStatusCoordinator,
         hub_id: str,
         entry_id: str,
     ) -> None:
         super().__init__(coordinator)
         self._hub_id = hub_id
+        self._status_coordinator = status_coordinator
         self._attr_unique_id = f"{hub_id}_battery_cumulative_discharge_energy"
         self._attr_name = f"Anode Hub {hub_id} Battery Cumulative Discharge Energy"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hub_id)},
         )
 
-    def _get_delta_kwh(self) -> float | None:
+    @property
+    def native_value(self) -> float | None:
         batteries = self.coordinator.data.get("batteries", {})
         if not batteries:
             return None
-        total_wh = sum(d.get("export_wh", 0.0) for d in batteries.values())
-        return total_wh / 1000
+        total = sum(
+            b.get("exportEnergy", {}).get("value", 0)
+            for b in batteries.values()
+        )
+        return total / 10000
 
 
 # ---------------------------------------------------------------------------

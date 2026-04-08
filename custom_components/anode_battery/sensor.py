@@ -126,15 +126,24 @@ async def async_setup_entry(
             AnodeHubGridExportEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
         ])
 
-    # Add house sensors if both PRIMARY and EXT_INVERTER are present
-    _LOGGER.info("House sensor check: has_primary=%s, has_ext_inverter=%s", has_primary, has_ext_inverter)
+    # House power still requires both a grid meter and a generation source to
+    # be meaningful (it subtracts ext-inverter power from primary).
     if has_primary and has_ext_inverter:
-        _LOGGER.info("Adding house power and energy sensors for hub %s", hub_id)
-        entities.extend([
-            AnodeHousePowerSensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
-            AnodeHouseEnergyConsumedSensor(energy_coordinator, status_coordinator, hub_id, entry.entry_id),
-            AnodeHouseEnergyGeneratedSensor(energy_coordinator, status_coordinator, hub_id, entry.entry_id),
-        ])
+        entities.append(
+            AnodeHousePowerSensor(device_coordinator, status_coordinator, hub_id, entry.entry_id)
+        )
+
+    # Net house energy: only a grid reference is required. A grid-only or
+    # grid+battery hub (no solar) still gets a meaningful reading.
+    has_grid = any(
+        m.get("type") == "PRIMARY" or m.get("meterPurpose") == "primary"
+        for m in status_data.get("meter", [])
+    )
+    if has_grid:
+        _LOGGER.info("Adding net house energy sensor for hub %s", hub_id)
+        entities.append(
+            AnodeHouseEnergySensor(energy_coordinator, status_coordinator, hub_id, entry.entry_id)
+        )
 
     async_add_entities(entities)
 
@@ -1318,56 +1327,63 @@ class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Derived house energy sensors (cumulative via energy coordinator deltas)
+# Derived house energy sensor (cumulative via energy coordinator deltas)
 # ---------------------------------------------------------------------------
 
 
-def _calc_house_energy_delta(
+def _is_grid_meter(meter: dict) -> bool:
+    """A grid reference meter (PRIMARY type or meterPurpose == primary)."""
+    return meter.get("type") == "PRIMARY" or meter.get("meterPurpose") == "primary"
+
+
+def _is_generation_meter(meter: dict) -> bool:
+    """A generation source meter (solar inverter, PV, etc.)."""
+    return meter.get("type") == "EXT_INVERTER" or meter.get("meterPurpose") == "solar"
+
+
+def _calc_house_energy_net_delta(
     coordinator: AnodeEnergyCoordinator,
     status_coordinator: AnodeStatusCoordinator,
-) -> tuple[float | None, float | None]:
-    """Return (consumed_kwh, generated_kwh) delta or (None, None)."""
-    primary_id = None
-    ext_inverter_id = None
-    for meter in status_coordinator.data.get("meter", []):
-        t = meter.get("type")
-        if t == "PRIMARY":
-            primary_id = meter["id"]
-        elif t == "EXT_INVERTER":
-            ext_inverter_id = meter["id"]
+) -> float | None:
+    """Return net kWh delivered into the house envelope this update window.
 
-    if not primary_id or not ext_inverter_id:
-        return None, None
+    house_energy = net_grid + net_generation + net_battery
+                 = (grid_import - grid_export)
+                 + Σ(gen_export - gen_import)      over all generation meters
+                 + Σ(batt_discharge - batt_charge) over all batteries
 
-    meters = coordinator.data.get("meters", {})
-    primary = meters.get(primary_id)
-    ext_inv = meters.get(ext_inverter_id)
-    if not primary or not ext_inv:
-        return None, None
+    This is the "wastage" / actual house load — what the envelope consumed
+    after accounting for everything we can measure flowing in and out.
+    """
+    meters_meta = status_coordinator.data.get("meter", []) or []
+    meters_energy = coordinator.data.get("meters", {}) or {}
+    batteries = coordinator.data.get("batteries", {}) or {}
 
-    primary_import = primary.get("import_wh", 0.0)
-    primary_export = primary.get("export_wh", 0.0)
-    ext_import = ext_inv.get("import_wh", 0.0)
-    ext_export = ext_inv.get("export_wh", 0.0)
+    grid_ids = [m["id"] for m in meters_meta if _is_grid_meter(m)]
+    gen_ids = [m["id"] for m in meters_meta if _is_generation_meter(m)]
 
-    battery_ids = [b["id"] for b in status_coordinator.data.get("battery", [])]
-    batteries = coordinator.data.get("batteries", {})
-    batt_charge = sum(batteries.get(bid, {}).get("import_wh", 0.0) for bid in battery_ids)
-    batt_discharge = sum(batteries.get(bid, {}).get("export_wh", 0.0) for bid in battery_ids)
+    if not grid_ids:
+        # Without a grid reference we can't meaningfully close the loop.
+        return None
 
-    # House consumed = grid import + battery discharge - ext_inverter import
-    consumed_wh = primary_import + batt_discharge - ext_import - batt_charge
-    # House generated (surplus to grid) = ext_inverter export + battery charge - grid export - battery discharge
-    generated_wh = ext_export + batt_charge - primary_export - batt_discharge
+    net_wh = 0.0
+    for mid in grid_ids:
+        d = meters_energy.get(mid, {})
+        net_wh += d.get("import_wh", 0.0) - d.get("export_wh", 0.0)
+    for mid in gen_ids:
+        d = meters_energy.get(mid, {})
+        net_wh += d.get("export_wh", 0.0) - d.get("import_wh", 0.0)
+    for bid, d in batteries.items():
+        net_wh += d.get("export_wh", 0.0) - d.get("import_wh", 0.0)
 
-    return (
-        max(consumed_wh, 0.0) / 1000,
-        max(generated_wh, 0.0) / 1000,
-    )
+    # Clamp: the sensor is TOTAL_INCREASING and _CumulativeEnergySensorBase
+    # only accumulates positive deltas anyway. A brief sign-opposite window
+    # (e.g. clock skew between meter reads) should be ignored, not explode.
+    return max(net_wh, 0.0) / 1000
 
 
-class AnodeHouseEnergyConsumedSensor(_CumulativeEnergySensorBase):
-    """Derived cumulative house consumed energy."""
+class AnodeHouseEnergySensor(_CumulativeEnergySensorBase):
+    """Single cumulative net house energy (actual house load)."""
 
     _attr_icon = "mdi:home-lightning-bolt"
 
@@ -1381,38 +1397,11 @@ class AnodeHouseEnergyConsumedSensor(_CumulativeEnergySensorBase):
         super().__init__(coordinator)
         self._hub_id = hub_id
         self._status_coordinator = status_coordinator
-        self._attr_unique_id = f"{hub_id}_house_energy_consumed"
-        self._attr_name = f"Anode Hub {hub_id} House Energy Consumed"
+        self._attr_unique_id = f"{hub_id}_house_energy"
+        self._attr_name = f"Anode Hub {hub_id} House Energy"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hub_id)},
         )
 
     def _get_delta_kwh(self) -> float | None:
-        consumed, _ = _calc_house_energy_delta(self.coordinator, self._status_coordinator)
-        return consumed
-
-
-class AnodeHouseEnergyGeneratedSensor(_CumulativeEnergySensorBase):
-    """Derived cumulative house generated/exported energy."""
-
-    _attr_icon = "mdi:solar-power"
-
-    def __init__(
-        self,
-        coordinator: AnodeEnergyCoordinator,
-        status_coordinator: AnodeStatusCoordinator,
-        hub_id: str,
-        entry_id: str,
-    ) -> None:
-        super().__init__(coordinator)
-        self._hub_id = hub_id
-        self._status_coordinator = status_coordinator
-        self._attr_unique_id = f"{hub_id}_house_energy_generated"
-        self._attr_name = f"Anode Hub {hub_id} House Energy Generated"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hub_id)},
-        )
-
-    def _get_delta_kwh(self) -> float | None:
-        _, generated = _calc_house_energy_delta(self.coordinator, self._status_coordinator)
-        return generated
+        return _calc_house_energy_net_delta(self.coordinator, self._status_coordinator)

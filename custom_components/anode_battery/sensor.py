@@ -20,9 +20,11 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, CONF_HUB_ID
 from .coordinator import (
@@ -81,11 +83,29 @@ async def async_setup_entry(
             AnodeBatteryDischargeEnergySensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
         ])
 
-    # Cumulative battery energy sensors (on hub device)
+    # Cumulative battery energy sensors (on hub device) + their daily-reset twins
     if battery_ids:
+        battery_charge_total = AnodeBatteryCumulativeChargeEnergySensor(
+            device_coordinator, status_coordinator, hub_id, entry.entry_id
+        )
+        battery_discharge_total = AnodeBatteryCumulativeDischargeEnergySensor(
+            device_coordinator, status_coordinator, hub_id, entry.entry_id
+        )
         entities.extend([
-            AnodeBatteryCumulativeChargeEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
-            AnodeBatteryCumulativeDischargeEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
+            battery_charge_total,
+            battery_discharge_total,
+            AnodeDailyResetEnergySensor(
+                device_coordinator, battery_charge_total, hub_id,
+                unique_suffix="battery_charge_energy_today",
+                name_suffix="Battery Charge Energy Today",
+                icon="mdi:battery-charging",
+            ),
+            AnodeDailyResetEnergySensor(
+                device_coordinator, battery_discharge_total, hub_id,
+                unique_suffix="battery_discharge_energy_today",
+                name_suffix="Battery Discharge Energy Today",
+                icon="mdi:battery-minus",
+            ),
         ])
 
     # Meter sensors
@@ -119,11 +139,29 @@ async def async_setup_entry(
                 AnodeMeterParentSensor(status_coordinator, hub_id, meter_id, entry.entry_id)
             )
 
-    # Add grid energy sensors on hub device (duplicating PRIMARY meter)
+    # Grid energy sensors on hub device (duplicating PRIMARY meter) + daily-reset twins
     if has_primary:
+        grid_import_total = AnodeHubGridImportEnergySensor(
+            device_coordinator, status_coordinator, hub_id, entry.entry_id
+        )
+        grid_export_total = AnodeHubGridExportEnergySensor(
+            device_coordinator, status_coordinator, hub_id, entry.entry_id
+        )
         entities.extend([
-            AnodeHubGridImportEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
-            AnodeHubGridExportEnergySensor(device_coordinator, status_coordinator, hub_id, entry.entry_id),
+            grid_import_total,
+            grid_export_total,
+            AnodeDailyResetEnergySensor(
+                device_coordinator, grid_import_total, hub_id,
+                unique_suffix="grid_import_energy_today",
+                name_suffix="Grid Import Energy Today",
+                icon="mdi:transmission-tower-import",
+            ),
+            AnodeDailyResetEnergySensor(
+                device_coordinator, grid_export_total, hub_id,
+                unique_suffix="grid_export_energy_today",
+                name_suffix="Grid Export Energy Today",
+                icon="mdi:transmission-tower-export",
+            ),
         ])
 
     # House power still requires both a grid meter and a generation source to
@@ -141,9 +179,18 @@ async def async_setup_entry(
     )
     if has_grid:
         _LOGGER.info("Adding net house energy sensor for hub %s", hub_id)
-        entities.append(
-            AnodeHouseEnergySensor(energy_coordinator, status_coordinator, hub_id, entry.entry_id)
+        house_energy_total = AnodeHouseEnergySensor(
+            energy_coordinator, status_coordinator, hub_id, entry.entry_id
         )
+        entities.extend([
+            house_energy_total,
+            AnodeDailyResetEnergySensor(
+                energy_coordinator, house_energy_total, hub_id,
+                unique_suffix="house_energy_today",
+                name_suffix="House Energy Today",
+                icon="mdi:home-lightning-bolt",
+            ),
+        ])
 
     async_add_entities(entities)
 
@@ -1405,3 +1452,111 @@ class AnodeHouseEnergySensor(_CumulativeEnergySensorBase):
 
     def _get_delta_kwh(self) -> float | None:
         return _calc_house_energy_net_delta(self.coordinator, self._status_coordinator)
+
+
+# ---------------------------------------------------------------------------
+# Daily-reset ("today") wrapper sensors
+# ---------------------------------------------------------------------------
+
+
+class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
+    """Wrap a TOTAL_INCREASING energy sensor and expose a daily-reset version.
+
+    Keeps a baseline snapshot of the source sensor's cumulative value taken at
+    the most recent local midnight. native_value = source_total - baseline
+    (clamped ≥0). Baseline and reset day are persisted as state attributes so
+    the "today" figure survives HA restarts mid-day.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(
+        self,
+        coordinator,
+        source_sensor: SensorEntity,
+        hub_id: str,
+        unique_suffix: str,
+        name_suffix: str,
+        icon: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._source_sensor = source_sensor
+        self._hub_id = hub_id
+        self._baseline_kwh: float | None = None
+        self._last_reset_day: str | None = None
+        self._attr_unique_id = f"{hub_id}_{unique_suffix}"
+        self._attr_name = f"Anode Hub {hub_id} {name_suffix}"
+        self._attr_icon = icon
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.attributes:
+            baseline = last_state.attributes.get("baseline_kwh")
+            last_day = last_state.attributes.get("last_reset_day")
+            if isinstance(baseline, (int, float)):
+                self._baseline_kwh = float(baseline)
+            if isinstance(last_day, str):
+                self._last_reset_day = last_day
+
+        # If we've rolled past midnight while HA was down (or this is the
+        # very first run), rebaseline now against the current source value.
+        self._maybe_rebaseline()
+
+        # Schedule a reset at every local midnight.
+        self.async_on_remove(
+            async_track_time_change(
+                self.hass,
+                self._midnight_reset,
+                hour=0,
+                minute=0,
+                second=0,
+            )
+        )
+
+    @callback
+    def _midnight_reset(self, _now) -> None:
+        total = self._current_total()
+        if total is None:
+            return
+        self._baseline_kwh = total
+        self._last_reset_day = dt_util.now().date().isoformat()
+        self.async_write_ha_state()
+
+    def _current_total(self) -> float | None:
+        try:
+            total = self._source_sensor.native_value
+        except Exception:  # noqa: BLE001
+            return None
+        if total is None:
+            return None
+        try:
+            return float(total)
+        except (TypeError, ValueError):
+            return None
+
+    def _maybe_rebaseline(self) -> None:
+        total = self._current_total()
+        if total is None:
+            return
+        today = dt_util.now().date().isoformat()
+        if self._last_reset_day != today or self._baseline_kwh is None:
+            self._baseline_kwh = total
+            self._last_reset_day = today
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "baseline_kwh": self._baseline_kwh,
+            "last_reset_day": self._last_reset_day,
+        }
+
+    @property
+    def native_value(self) -> float | None:
+        total = self._current_total()
+        if total is None or self._baseline_kwh is None:
+            return None
+        return max(round(total - self._baseline_kwh, 3), 0.0)

@@ -126,6 +126,15 @@ class AnodeAPIClient:
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Config error: {err}") from err
 
+    async def get_device_metadata(self) -> list[dict[str, Any]]:
+        """Return per-device metadata (alias, meterPurpose) for the hub.
+
+        Calls the installer-gui user endpoint, which returns:
+        ``{"success": true, "metadata": [{"friendlyId", "alias", "meterPurpose"}]}``.
+        """
+        data = await self._request(f"/api/user/device-metadata/{self.hub_id}")
+        return data.get("metadata", []) or []
+
     async def get_telemetry(self, device_id: str, from_dt: datetime, to_dt: datetime) -> dict[str, Any]:
         """Get energy telemetry for a device over a time range."""
         from_str = from_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -155,13 +164,37 @@ class AnodeStatusCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch hub status data."""
+        """Fetch hub status data and merge in per-device metadata."""
         try:
-            return await self.api_client.get_hub_status()
+            status = await self.api_client.get_hub_status()
         except UpdateFailed:
             raise
         except Exception as err:
             raise UpdateFailed(f"Error fetching hub status: {err}") from err
+
+        # Fail-soft metadata fetch: older hubs / backends may not expose this
+        # endpoint. If it errors, proceed with meterPurpose = None so the rest
+        # of the integration keeps working.
+        purpose_by_id: dict[str, str | None] = {}
+        alias_by_id: dict[str, str | None] = {}
+        try:
+            metadata = await self.api_client.get_device_metadata()
+            for item in metadata:
+                fid = item.get("friendlyId")
+                if not fid:
+                    continue
+                purpose_by_id[fid] = item.get("meterPurpose")
+                alias_by_id[fid] = item.get("alias")
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Device metadata unavailable: %s", err)
+
+        for meter in status.get("meter", []) or []:
+            mid = meter.get("id")
+            meter["meterPurpose"] = purpose_by_id.get(mid)
+            if alias_by_id.get(mid) is not None:
+                meter.setdefault("alias", alias_by_id.get(mid))
+
+        return status
 
 
 class AnodeDeviceCoordinator(DataUpdateCoordinator):

@@ -180,12 +180,12 @@ async def async_setup_entry(
     if has_grid:
         _LOGGER.info("Adding net house energy sensor for hub %s", hub_id)
         house_energy_total = AnodeHouseEnergySensor(
-            energy_coordinator, status_coordinator, hub_id, entry.entry_id
+            device_coordinator, status_coordinator, hub_id, entry.entry_id
         )
         entities.extend([
             house_energy_total,
             AnodeDailyResetEnergySensor(
-                energy_coordinator, house_energy_total, hub_id,
+                device_coordinator, house_energy_total, hub_id,
                 unique_suffix="house_energy_today",
                 name_suffix="House Energy Today",
                 icon="mdi:home-lightning-bolt",
@@ -1374,7 +1374,7 @@ class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Derived house energy sensor (cumulative via energy coordinator deltas)
+# Derived house energy sensor (projection of hardware counters)
 # ---------------------------------------------------------------------------
 
 
@@ -1388,23 +1388,39 @@ def _is_generation_meter(meter: dict) -> bool:
     return meter.get("type") == "EXT_INVERTER" or meter.get("meterPurpose") == "solar"
 
 
-def _calc_house_energy_net_delta(
-    coordinator: AnodeEnergyCoordinator,
+def _counter_kwh(d: dict | None, key: str) -> float:
+    """Read a hardware energy counter (dWh) and return kWh. 0.0 on missing."""
+    if not d:
+        return 0.0
+    entry = d.get(key)
+    if not isinstance(entry, dict):
+        return 0.0
+    value = entry.get("value")
+    if value is None:
+        return 0.0
+    try:
+        return float(value) / 10000.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _calc_house_energy_total(
+    device_coordinator: AnodeDeviceCoordinator,
     status_coordinator: AnodeStatusCoordinator,
 ) -> float | None:
-    """Return net kWh delivered into the house envelope this update window.
+    """Project the net house-load total directly from monotonic hardware counters.
 
-    house_energy = net_grid + net_generation + net_battery
-                 = (grid_import - grid_export)
-                 + Σ(gen_export - gen_import)      over all generation meters
-                 + Σ(batt_discharge - batt_charge) over all batteries
+    house_total = (grid_import - grid_export)
+                + Σ(gen_export - gen_import)        over generation meters
+                + Σ(batt_discharge - batt_charge)   over all batteries
 
-    This is the "wastage" / actual house load — what the envelope consumed
-    after accounting for everything we can measure flowing in and out.
+    All inputs come straight from the hub's per-device counters via
+    `AnodeDeviceCoordinator`, so there is no windowed accumulation, no clamping,
+    and no drift against the underlying meters.
     """
     meters_meta = status_coordinator.data.get("meter", []) or []
-    meters_energy = coordinator.data.get("meters", {}) or {}
-    batteries = coordinator.data.get("batteries", {}) or {}
+    meters_data = device_coordinator.data.get("meters", {}) or {}
+    batteries_data = device_coordinator.data.get("batteries", {}) or {}
 
     grid_ids = [m["id"] for m in meters_meta if _is_grid_meter(m)]
     gen_ids = [m["id"] for m in meters_meta if _is_generation_meter(m)]
@@ -1413,45 +1429,68 @@ def _calc_house_energy_net_delta(
         # Without a grid reference we can't meaningfully close the loop.
         return None
 
-    net_wh = 0.0
+    total = 0.0
     for mid in grid_ids:
-        d = meters_energy.get(mid, {})
-        net_wh += d.get("import_wh", 0.0) - d.get("export_wh", 0.0)
+        d = meters_data.get(mid)
+        total += _counter_kwh(d, "importEnergy") - _counter_kwh(d, "exportEnergy")
     for mid in gen_ids:
-        d = meters_energy.get(mid, {})
-        net_wh += d.get("export_wh", 0.0) - d.get("import_wh", 0.0)
-    for bid, d in batteries.items():
-        net_wh += d.get("export_wh", 0.0) - d.get("import_wh", 0.0)
+        d = meters_data.get(mid)
+        total += _counter_kwh(d, "exportEnergy") - _counter_kwh(d, "importEnergy")
+    for d in batteries_data.values():
+        total += _counter_kwh(d, "exportEnergy") - _counter_kwh(d, "importEnergy")
 
-    # Clamp: the sensor is TOTAL_INCREASING and _CumulativeEnergySensorBase
-    # only accumulates positive deltas anyway. A brief sign-opposite window
-    # (e.g. clock skew between meter reads) should be ignored, not explode.
-    return max(net_wh, 0.0) / 1000
+    return total
 
 
-class AnodeHouseEnergySensor(_CumulativeEnergySensorBase):
-    """Single cumulative net house energy (actual house load)."""
+class AnodeHouseEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
+    """Net house energy, derived from hardware counters with a high-watermark.
 
+    The underlying counters aren't all polled atomically, so their sum can
+    briefly dip a few Wh when one device's counter refreshes before another.
+    We publish max(current_sum, persisted_peak) so the exposed value stays
+    monotonic and the HA Energy dashboard is happy with `TOTAL_INCREASING`.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:home-lightning-bolt"
 
     def __init__(
         self,
-        coordinator: AnodeEnergyCoordinator,
+        device_coordinator: AnodeDeviceCoordinator,
         status_coordinator: AnodeStatusCoordinator,
         hub_id: str,
         entry_id: str,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(device_coordinator)
         self._hub_id = hub_id
         self._status_coordinator = status_coordinator
+        self._peak_kwh: float | None = None
         self._attr_unique_id = f"{hub_id}_house_energy"
         self._attr_name = f"Anode Hub {hub_id} House Energy"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hub_id)},
-        )
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
 
-    def _get_delta_kwh(self) -> float | None:
-        return _calc_house_energy_net_delta(self.coordinator, self._status_coordinator)
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+            try:
+                self._peak_kwh = float(last_state.state)
+            except (TypeError, ValueError):
+                self._peak_kwh = None
+
+    @property
+    def native_value(self) -> float | None:
+        current = _calc_house_energy_total(self.coordinator, self._status_coordinator)
+        if current is None:
+            # Fall back to the last-known peak rather than going unavailable,
+            # so Energy dashboard statistics don't see a gap on transient
+            # coordinator misses.
+            return round(self._peak_kwh, 3) if self._peak_kwh is not None else None
+        if self._peak_kwh is None or current > self._peak_kwh:
+            self._peak_kwh = current
+        return round(self._peak_kwh, 3)
 
 
 # ---------------------------------------------------------------------------

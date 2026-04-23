@@ -23,11 +23,13 @@ set_override:
             - MATCH
     duration:
       name: Duration
-      description: Duration of the override in seconds. Use 0 to cancel an active override.
+      description: Duration of the override in seconds. Use 0 to cancel an active override. Any positive value is allowed.
       required: true
       example: 3600
       selector:
         number:
           min: 0
-          max: 86400
+          max: 604800
+          step: 1
+          mode: box
           unit_of_measurement: seconds

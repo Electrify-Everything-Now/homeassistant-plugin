@@ -44,10 +44,48 @@ async def test_battery_power_sensor(hass: HomeAssistant, init_integration) -> No
 
 
 async def test_battery_soc_sensor(hass: HomeAssistant, init_integration) -> None:
-    """Test battery SOC sensor."""
+    """Test battery SOC sensor (integer percentage)."""
     state = hass.states.get("sensor.anode_battery_battery1_state_of_charge")
     assert state is not None
-    assert state.state == "75.0"
+    assert state.state == "75"
+    assert state.attributes.get("unit_of_measurement") == "%"
+
+
+async def test_battery_energy_capacity_sensor(hass: HomeAssistant, init_integration) -> None:
+    """Battery Wh capacity: 136 Ah * 44.4 V = 6038.4 Wh."""
+    state = hass.states.get("sensor.anode_battery_battery1_energy_capacity")
+    assert state is not None
+    assert float(state.state) == 6038.4
+    assert state.attributes.get("unit_of_measurement") == "Wh"
+
+
+async def test_battery_energy_remaining_sensor(hass: HomeAssistant, init_integration) -> None:
+    """Battery Wh remaining: 6038.4 Wh * 75% = 4528.8 Wh."""
+    state = hass.states.get("sensor.anode_battery_battery1_energy_remaining")
+    assert state is not None
+    assert float(state.state) == 4528.8
+    assert state.attributes.get("unit_of_measurement") == "Wh"
+
+
+async def test_hub_battery_energy_capacity_sensor(hass: HomeAssistant, init_integration) -> None:
+    """Hub aggregate Wh capacity (single battery fixture)."""
+    state = hass.states.get("sensor.anode_hub_test123_battery_energy_capacity")
+    assert state is not None
+    assert float(state.state) == 6038.4
+
+
+async def test_hub_battery_energy_remaining_sensor(hass: HomeAssistant, init_integration) -> None:
+    """Hub aggregate Wh remaining (single battery fixture)."""
+    state = hass.states.get("sensor.anode_hub_test123_battery_energy_remaining")
+    assert state is not None
+    assert float(state.state) == 4528.8
+
+
+async def test_hub_average_soc_sensor(hass: HomeAssistant, init_integration) -> None:
+    """Hub capacity-weighted average SOC is integer."""
+    state = hass.states.get("sensor.anode_hub_test123_average_state_of_charge")
+    assert state is not None
+    assert state.state == "75"
     assert state.attributes.get("unit_of_measurement") == "%"
 
 

@@ -136,8 +136,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Anode."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+        """Stash the entry under a private attr.
+
+        We avoid assigning `self.config_entry` because HA ≥ 2024.11 exposes
+        it as a read-only property and rejects assignment.
+        """
+        self._entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -150,13 +154,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             {
                 vol.Optional(
                     CONF_STATUS_INTERVAL,
-                    default=self.config_entry.options.get(
+                    default=self._entry.options.get(
                         CONF_STATUS_INTERVAL, DEFAULT_STATUS_INTERVAL
                     ),
                 ): vol.All(cv.positive_int, vol.Range(min=MIN_UPDATE_INTERVAL)),
                 vol.Optional(
                     CONF_DEVICE_INTERVAL,
-                    default=self.config_entry.options.get(
+                    default=self._entry.options.get(
                         CONF_DEVICE_INTERVAL, DEFAULT_DEVICE_INTERVAL
                     ),
                 ): vol.All(cv.positive_int, vol.Range(min=MIN_UPDATE_INTERVAL)),

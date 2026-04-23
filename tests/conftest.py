@@ -27,6 +27,7 @@ def mock_anode_api():
         autospec=True,
     ) as mock_api:
         api_instance = mock_api.return_value
+        api_instance.hub_id = "test123"
         api_instance.get_hub_status = AsyncMock(return_value={
             "status": True,
             "hub": {

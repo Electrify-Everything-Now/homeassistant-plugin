@@ -75,6 +75,8 @@ async def async_setup_entry(
             AnodeBatterySOCSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryCapacitySensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryCapacityRemainingSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryEnergyCapacitySensor(device_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryEnergyRemainingSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryNominalVoltageSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryVersionSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryUptimeSensor(status_coordinator, hub_id, battery_id, entry.entry_id),
@@ -106,6 +108,9 @@ async def async_setup_entry(
                 name_suffix="Battery Discharge Energy Today",
                 icon="mdi:battery-minus",
             ),
+            AnodeHubBatteryEnergyCapacitySensor(device_coordinator, hub_id, entry.entry_id),
+            AnodeHubBatteryEnergyRemainingSensor(device_coordinator, hub_id, entry.entry_id),
+            AnodeHubAverageSOCSensor(device_coordinator, hub_id, entry.entry_id),
         ])
 
     # Meter sensors
@@ -467,11 +472,14 @@ class AnodeBatterySOCSensor(CoordinatorEntity, SensorEntity):
         )
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> int | None:
         """Return the state of the sensor."""
         battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
         if battery_data and "soc" in battery_data:
-            return battery_data["soc"].get("value")
+            value = battery_data["soc"].get("value")
+            if value is None:
+                return None
+            return int(round(value))
         return None
 
     @property
@@ -550,6 +558,89 @@ class AnodeBatteryCapacityRemainingSensor(CoordinatorEntity, SensorEntity):
         if capacity is not None and soc is not None:
             return round(capacity * soc / 100, 2)
         return None
+
+
+def _battery_energy_wh(battery_data: dict | None) -> float | None:
+    """Return total battery energy capacity in Wh (Ah * V)."""
+    if not battery_data:
+        return None
+    cap = battery_data.get("capacity", {})
+    ah = cap.get("value")
+    volts = cap.get("nominalVoltage")
+    if ah is None or volts is None:
+        return None
+    return ah * volts
+
+
+def _battery_energy_remaining_wh(battery_data: dict | None) -> float | None:
+    """Return remaining battery energy in Wh (Ah * V * SOC/100)."""
+    total = _battery_energy_wh(battery_data)
+    if total is None:
+        return None
+    soc = battery_data.get("soc", {}).get("value")
+    if soc is None:
+        return None
+    return total * soc / 100
+
+
+class AnodeBatteryEnergyCapacitySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery total energy capacity in Wh."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY_STORAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+    _attr_icon = "mdi:battery-heart-variant"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_energy_capacity"
+        self._attr_name = f"Anode Battery {battery_id} Energy Capacity"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        value = _battery_energy_wh(battery_data)
+        return round(value, 1) if value is not None else None
+
+
+class AnodeBatteryEnergyRemainingSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for battery remaining energy in Wh (Ah * V * SOC/100)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY_STORAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+    _attr_icon = "mdi:battery-clock"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        battery_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._battery_id = battery_id
+        self._attr_unique_id = f"{battery_id}_energy_remaining"
+        self._attr_name = f"Anode Battery {battery_id} Energy Remaining"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, battery_id)},
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        battery_data = self.coordinator.data.get("batteries", {}).get(self._battery_id)
+        value = _battery_energy_remaining_wh(battery_data)
+        return round(value, 1) if value is not None else None
 
 
 class AnodeBatteryNominalVoltageSensor(CoordinatorEntity, SensorEntity):
@@ -1211,6 +1302,113 @@ class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntit
             for b in batteries.values()
         )
         return total / 10000
+
+
+# ---------------------------------------------------------------------------
+# Hub-level battery aggregate sensors (sum across all batteries)
+# ---------------------------------------------------------------------------
+
+
+def _hub_battery_energy_totals(
+    coordinator: AnodeDeviceCoordinator,
+) -> tuple[float | None, float | None]:
+    """Return (total_wh, remaining_wh) summed across all batteries, or (None, None)."""
+    batteries = coordinator.data.get("batteries", {})
+    if not batteries:
+        return None, None
+    total = 0.0
+    remaining = 0.0
+    have_any = False
+    for battery_data in batteries.values():
+        b_total = _battery_energy_wh(battery_data)
+        b_remaining = _battery_energy_remaining_wh(battery_data)
+        if b_total is None or b_remaining is None:
+            continue
+        total += b_total
+        remaining += b_remaining
+        have_any = True
+    if not have_any:
+        return None, None
+    return total, remaining
+
+
+class AnodeHubBatteryEnergyCapacitySensor(CoordinatorEntity, SensorEntity):
+    """Total battery energy capacity across all batteries (Wh)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY_STORAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+    _attr_icon = "mdi:battery-heart-variant"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._attr_unique_id = f"{hub_id}_battery_energy_capacity"
+        self._attr_name = f"Anode Hub {hub_id} Battery Energy Capacity"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
+
+    @property
+    def native_value(self) -> float | None:
+        total, _ = _hub_battery_energy_totals(self.coordinator)
+        return round(total, 1) if total is not None else None
+
+
+class AnodeHubBatteryEnergyRemainingSensor(CoordinatorEntity, SensorEntity):
+    """Remaining battery energy across all batteries (Wh)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY_STORAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+    _attr_icon = "mdi:battery-clock"
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._attr_unique_id = f"{hub_id}_battery_energy_remaining"
+        self._attr_name = f"Anode Hub {hub_id} Battery Energy Remaining"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
+
+    @property
+    def native_value(self) -> float | None:
+        _, remaining = _hub_battery_energy_totals(self.coordinator)
+        return round(remaining, 1) if remaining is not None else None
+
+
+class AnodeHubAverageSOCSensor(CoordinatorEntity, SensorEntity):
+    """Capacity-weighted average SOC across all batteries (integer %)."""
+
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(
+        self,
+        coordinator: AnodeDeviceCoordinator,
+        hub_id: str,
+        entry_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hub_id = hub_id
+        self._attr_unique_id = f"{hub_id}_average_soc"
+        self._attr_name = f"Anode Hub {hub_id} Average State of Charge"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
+
+    @property
+    def native_value(self) -> int | None:
+        total, remaining = _hub_battery_energy_totals(self.coordinator)
+        if not total or remaining is None:
+            return None
+        return int(round(remaining / total * 100))
 
 
 # ---------------------------------------------------------------------------

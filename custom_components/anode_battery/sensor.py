@@ -68,8 +68,9 @@ async def async_setup_entry(
 
     for battery in status_data.get("battery", []):
         battery_id = battery["id"]
+        battery_alias = battery.get("alias")
         entities.extend([
-            AnodeBatteryPowerSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
+            AnodeBatteryPowerSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id, alias=battery_alias),
             AnodeBatteryImportPowerSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatteryExportPowerSensor(device_coordinator, hub_id, battery_id, entry.entry_id),
             AnodeBatterySOCSensor(device_coordinator, status_coordinator, hub_id, battery_id, entry.entry_id),
@@ -120,6 +121,7 @@ async def async_setup_entry(
     for meter in status_data.get("meter", []):
         meter_id = meter["id"]
         meter_type = meter.get("type")
+        meter_alias = meter.get("alias")
 
         _LOGGER.debug("Found meter: id=%s, type=%s", meter_id, meter_type)
 
@@ -129,7 +131,7 @@ async def async_setup_entry(
             has_ext_inverter = True
 
         entities.extend([
-            AnodeMeterPowerSensor(device_coordinator, status_coordinator, hub_id, meter_id, entry.entry_id),
+            AnodeMeterPowerSensor(device_coordinator, status_coordinator, hub_id, meter_id, entry.entry_id, alias=meter_alias),
             AnodeMeterImportPowerSensor(device_coordinator, hub_id, meter_id, entry.entry_id),
             AnodeMeterExportPowerSensor(device_coordinator, hub_id, meter_id, entry.entry_id),
             AnodeMeterTypeSensor(status_coordinator, hub_id, meter_id, entry.entry_id),
@@ -342,6 +344,7 @@ class AnodeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         hub_id: str,
         battery_id: str,
         entry_id: str,
+        alias: str | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -352,7 +355,7 @@ class AnodeBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Anode Battery {battery_id} Power"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, battery_id)},
-            name=f"Anode {battery_id}",
+            name=alias or f"Anode {battery_id}",
             manufacturer="Anode",
             model="Battery",
             via_device=(DOMAIN, hub_id),
@@ -784,6 +787,7 @@ class AnodeMeterPowerSensor(CoordinatorEntity, SensorEntity):
         hub_id: str,
         meter_id: str,
         entry_id: str,
+        alias: str | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -794,7 +798,7 @@ class AnodeMeterPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Anode Meter {meter_id} Power"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, meter_id)},
-            name=f"Anode Meter {meter_id}",
+            name=alias or f"Anode Meter {meter_id}",
             manufacturer="Anode",
             model="Meter",
             via_device=(DOMAIN, hub_id),

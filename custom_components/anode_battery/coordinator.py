@@ -192,7 +192,16 @@ class AnodeStatusCoordinator(DataUpdateCoordinator):
             mid = meter.get("id")
             meter["meterPurpose"] = purpose_by_id.get(mid)
             if alias_by_id.get(mid) is not None:
-                meter.setdefault("alias", alias_by_id.get(mid))
+                meter["alias"] = alias_by_id.get(mid)
+
+        for battery in status.get("battery", []) or []:
+            bid = battery.get("id")
+            if alias_by_id.get(bid) is not None:
+                battery["alias"] = alias_by_id.get(bid)
+
+        hub_alias = alias_by_id.get(self.api_client.hub_id)
+        if hub_alias is not None:
+            status.setdefault("hub", {})["alias"] = hub_alias
 
         return status
 

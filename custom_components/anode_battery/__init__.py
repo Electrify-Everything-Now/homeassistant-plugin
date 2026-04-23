@@ -97,14 +97,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     # Register hub device
+    hub_info = status_data.get("hub", {}) or {}
+    hub_alias = hub_info.get("alias")
+    hub_name = hub_alias or f"Anode Hub {hub_id}"
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, hub_id)},
         manufacturer="Anode",
-        name=f"Anode Hub {hub_id}",
+        name=hub_name,
         model="Hub",
-        sw_version=status_data.get("hub", {}).get("version", "unknown"),
+        sw_version=hub_info.get("version", "unknown"),
     )
 
     # Set up platforms

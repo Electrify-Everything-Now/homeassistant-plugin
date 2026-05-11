@@ -30,7 +30,6 @@ from .const import DOMAIN, CONF_HUB_ID
 from .coordinator import (
     AnodeStatusCoordinator,
     AnodeDeviceCoordinator,
-    AnodeEnergyCoordinator,
     AnodeModeCoordinator,
 )
 
@@ -48,7 +47,6 @@ async def async_setup_entry(
 
     status_coordinator: AnodeStatusCoordinator = coordinators["status_coordinator"]
     device_coordinator: AnodeDeviceCoordinator = coordinators["device_coordinator"]
-    energy_coordinator: AnodeEnergyCoordinator = coordinators["energy_coordinator"]
     mode_coordinator: AnodeModeCoordinator = coordinators["mode_coordinator"]
 
     entities: list[SensorEntity] = []
@@ -1644,13 +1642,15 @@ def _calc_house_energy_total(
     return total
 
 
-class AnodeHouseEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
-    """Net house energy, derived from hardware counters with a high-watermark.
+class AnodeHouseEnergySensor(CoordinatorEntity, SensorEntity):
+    """Net house energy, projected from the hub's monotonic hardware counters.
 
-    The underlying counters aren't all polled atomically, so their sum can
-    briefly dip a few Wh when one device's counter refreshes before another.
-    We publish max(current_sum, persisted_peak) so the exposed value stays
-    monotonic and the HA Energy dashboard is happy with `TOTAL_INCREASING`.
+    Stateless: every published value is recomputed from the latest device
+    coordinator snapshot. The snapshot is internally consistent (all counters
+    are polled within one coordinator update), and the underlying counters are
+    monotonic, so the projection is monotonic in steady state. HA's
+    TOTAL_INCREASING handles the rare large backward step (hub-side counter
+    reset) gracefully.
     """
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -1668,36 +1668,27 @@ class AnodeHouseEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         super().__init__(device_coordinator)
         self._hub_id = hub_id
         self._status_coordinator = status_coordinator
-        self._peak_kwh: float | None = None
         self._attr_unique_id = f"{hub_id}_house_energy"
         self._attr_name = f"Anode Hub {hub_id} House Energy"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state and last_state.state not in (None, "unknown", "unavailable"):
-            try:
-                self._peak_kwh = float(last_state.state)
-            except (TypeError, ValueError):
-                self._peak_kwh = None
 
     @property
     def native_value(self) -> float | None:
         current = _calc_house_energy_total(self.coordinator, self._status_coordinator)
         if current is None:
-            # Fall back to the last-known peak rather than going unavailable,
-            # so Energy dashboard statistics don't see a gap on transient
-            # coordinator misses.
-            return round(self._peak_kwh, 3) if self._peak_kwh is not None else None
-        if self._peak_kwh is None or current > self._peak_kwh:
-            self._peak_kwh = current
-        return round(self._peak_kwh, 3)
+            return None
+        return round(current, 3)
 
 
 # ---------------------------------------------------------------------------
 # Daily-reset ("today") wrapper sensors
 # ---------------------------------------------------------------------------
+
+
+# Tolerance for "source has dropped below baseline" rebaseline detection.
+# Smaller than the rounding precision used for the source's native_value, so
+# float churn around equality doesn't trip the rebaseline path.
+_REBASELINE_EPSILON_KWH = 0.001
 
 
 class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
@@ -1800,4 +1791,16 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
         total = self._current_total()
         if total is None or self._baseline_kwh is None:
             return None
+        # If the source has dropped well below our baseline (hub-side counter
+        # reset, or a logic-basis change in the source sensor), rebaseline to
+        # the new total so we don't sit at 0 until midnight.
+        if total + _REBASELINE_EPSILON_KWH < self._baseline_kwh:
+            _LOGGER.warning(
+                "Source for %s dropped below baseline (%.3f → %.3f kWh); rebaselining",
+                self._attr_unique_id,
+                self._baseline_kwh,
+                total,
+            )
+            self._baseline_kwh = total
+            return 0.0
         return max(round(total - self._baseline_kwh, 3), 0.0)

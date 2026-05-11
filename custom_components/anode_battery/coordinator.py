@@ -135,14 +135,6 @@ class AnodeAPIClient:
         data = await self._request(f"/api/user/device-metadata/{self.hub_id}")
         return data.get("metadata", []) or []
 
-    async def get_telemetry(self, device_id: str, from_dt: datetime, to_dt: datetime) -> dict[str, Any]:
-        """Get energy telemetry for a device over a time range."""
-        from_str = from_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        to_str = to_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        return await self._request(
-            f"/api/device/telemetry/{device_id}?from={from_str}&to={to_str}"
-        )
-
 
 class AnodeStatusCoordinator(DataUpdateCoordinator):
     """Coordinator for hub status and device discovery."""
@@ -366,73 +358,3 @@ class AnodeModeCoordinator(DataUpdateCoordinator):
         """Request a refresh soon (used after override changes)."""
         # Force immediate refresh
         await self.async_request_refresh()
-
-
-class AnodeEnergyCoordinator(DataUpdateCoordinator):
-    """Coordinator for energy telemetry (delta since last update)."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        api_client: AnodeAPIClient,
-    ) -> None:
-        """Initialize the coordinator."""
-        self.api_client = api_client
-        self._battery_ids: list[str] = []
-        self._meter_ids: list[str] = []
-        self._last_update_time: datetime | None = None
-
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_energy",
-            update_interval=timedelta(seconds=60),
-        )
-
-    def set_device_ids(self, battery_ids: list[str], meter_ids: list[str]) -> None:
-        """Update the list of devices to poll."""
-        self._battery_ids = battery_ids
-        self._meter_ids = meter_ids
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch energy telemetry delta since last successful update."""
-        now = dt_util.utcnow()
-
-        if self._last_update_time is None:
-            # First run: use a short lookback to seed initial delta
-            from_dt = now - timedelta(minutes=5)
-        else:
-            from_dt = self._last_update_time
-            # Clamp to API max of 24 hours
-            if (now - from_dt) > timedelta(hours=24):
-                from_dt = now - timedelta(hours=24)
-
-        data: dict[str, Any] = {
-            "batteries": {},
-            "meters": {},
-        }
-
-        for battery_id in self._battery_ids:
-            try:
-                result = await self.api_client.get_telemetry(battery_id, from_dt, now)
-                # Telemetry API already converts dWh→Wh internally; values are in Wh
-                data["batteries"][battery_id] = {
-                    "import_wh": result.get("import", 0.0),
-                    "export_wh": result.get("export", 0.0),
-                }
-            except UpdateFailed as err:
-                _LOGGER.debug("Failed to get energy telemetry for battery %s: %s", battery_id, err)
-
-        for meter_id in self._meter_ids:
-            try:
-                result = await self.api_client.get_telemetry(meter_id, from_dt, now)
-                # Telemetry API already converts dWh→Wh internally; values are in Wh
-                data["meters"][meter_id] = {
-                    "import_wh": result.get("import", 0.0),
-                    "export_wh": result.get("export", 0.0),
-                }
-            except UpdateFailed as err:
-                _LOGGER.debug("Failed to get energy telemetry for meter %s: %s", meter_id, err)
-
-        self._last_update_time = now
-        return data

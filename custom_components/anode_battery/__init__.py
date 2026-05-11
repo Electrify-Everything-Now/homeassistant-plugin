@@ -25,7 +25,6 @@ from .coordinator import (
     AnodeAPIClient,
     AnodeStatusCoordinator,
     AnodeDeviceCoordinator,
-    AnodeEnergyCoordinator,
     AnodeModeCoordinator,
 )
 
@@ -66,7 +65,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create coordinators
     status_coordinator = AnodeStatusCoordinator(hass, api_client, status_interval)
     device_coordinator = AnodeDeviceCoordinator(hass, api_client, device_interval)
-    energy_coordinator = AnodeEnergyCoordinator(hass, api_client)
     mode_coordinator = AnodeModeCoordinator(hass, api_client)
 
     # Initial data fetch
@@ -78,21 +76,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     battery_ids = [battery["id"] for battery in status_data.get("battery", [])]
     meter_ids = [meter["id"] for meter in status_data.get("meter", [])]
 
-    # Set device IDs in device and energy coordinators
+    # Set device IDs in the device coordinator
     device_coordinator.set_device_ids(battery_ids, meter_ids)
-    energy_coordinator.set_device_ids(battery_ids, meter_ids)
 
     # Fetch device data
     if battery_ids or meter_ids:
         await device_coordinator.async_config_entry_first_refresh()
-        await energy_coordinator.async_config_entry_first_refresh()
 
     # Store coordinators and API client
     hass.data[DOMAIN][entry.entry_id] = {
         "api_client": api_client,
         "status_coordinator": status_coordinator,
         "device_coordinator": device_coordinator,
-        "energy_coordinator": energy_coordinator,
         "mode_coordinator": mode_coordinator,
     }
 

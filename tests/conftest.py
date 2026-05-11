@@ -87,6 +87,8 @@ def mock_anode_api():
         api_instance.get_config = AsyncMock(return_value={"config": []})
         api_instance.set_config = AsyncMock(return_value={"status": True})
         api_instance.get_device_metadata = AsyncMock(return_value=[
+            {"friendlyId": "test123", "alias": "My Hub", "meterPurpose": None},
+            {"friendlyId": "battery1", "alias": "My Battery", "meterPurpose": None},
             {"friendlyId": "meter1", "alias": "Grid", "meterPurpose": "primary"},
             {"friendlyId": "meter2", "alias": "Solar", "meterPurpose": "solar"},
         ])

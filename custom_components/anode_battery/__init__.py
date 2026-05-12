@@ -25,7 +25,6 @@ from .coordinator import (
     AnodeAPIClient,
     AnodeStatusCoordinator,
     AnodeDeviceCoordinator,
-    AnodeEnergyCoordinator,
     AnodeModeCoordinator,
 )
 
@@ -47,6 +46,39 @@ SERVICE_SET_OVERRIDE_SCHEMA = vol.Schema({
 })
 
 
+def _sync_aliases_to_registry(
+    hass: HomeAssistant, hub_id: str, status_data: dict
+) -> None:
+    """Push web-UI device aliases into HA's device registry.
+
+    DeviceInfo only sets the device name when a device is first created. On
+    upgrade — and on any later web-UI rename — the integration must explicitly
+    update the registry. We update `name`, not `name_by_user`, so manual
+    renames in HA still win in the UI.
+    """
+    device_registry = dr.async_get(hass)
+
+    def _update(identifier: str, alias: str | None, default_name: str) -> None:
+        desired = alias or default_name
+        device = device_registry.async_get_device(identifiers={(DOMAIN, identifier)})
+        if device is None or device.name == desired:
+            return
+        device_registry.async_update_device(device.id, name=desired)
+
+    hub_alias = (status_data.get("hub") or {}).get("alias")
+    _update(hub_id, hub_alias, f"Anode Hub {hub_id}")
+
+    for battery in status_data.get("battery", []) or []:
+        bid = battery.get("id")
+        if bid:
+            _update(bid, battery.get("alias"), f"Anode {bid}")
+
+    for meter in status_data.get("meter", []) or []:
+        mid = meter.get("id")
+        if mid:
+            _update(mid, meter.get("alias"), f"Anode Meter {mid}")
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Anode from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -66,7 +98,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create coordinators
     status_coordinator = AnodeStatusCoordinator(hass, api_client, status_interval)
     device_coordinator = AnodeDeviceCoordinator(hass, api_client, device_interval)
-    energy_coordinator = AnodeEnergyCoordinator(hass, api_client)
     mode_coordinator = AnodeModeCoordinator(hass, api_client)
 
     # Initial data fetch
@@ -78,21 +109,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     battery_ids = [battery["id"] for battery in status_data.get("battery", [])]
     meter_ids = [meter["id"] for meter in status_data.get("meter", [])]
 
-    # Set device IDs in device and energy coordinators
+    # Set device IDs in the device coordinator
     device_coordinator.set_device_ids(battery_ids, meter_ids)
-    energy_coordinator.set_device_ids(battery_ids, meter_ids)
 
     # Fetch device data
     if battery_ids or meter_ids:
         await device_coordinator.async_config_entry_first_refresh()
-        await energy_coordinator.async_config_entry_first_refresh()
 
     # Store coordinators and API client
     hass.data[DOMAIN][entry.entry_id] = {
         "api_client": api_client,
         "status_coordinator": status_coordinator,
         "device_coordinator": device_coordinator,
-        "energy_coordinator": energy_coordinator,
         "mode_coordinator": mode_coordinator,
     }
 
@@ -112,6 +140,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Push aliases now (battery/meter devices were just created by their
+    # entities' DeviceInfo) and on every subsequent status refresh so live
+    # web-UI renames propagate without an HA reload.
+    _sync_aliases_to_registry(hass, hub_id, status_coordinator.data)
+    entry.async_on_unload(
+        status_coordinator.async_add_listener(
+            lambda: _sync_aliases_to_registry(
+                hass, hub_id, status_coordinator.data or {}
+            )
+        )
+    )
 
     # Register override service (only once, not per entry)
     if not hass.services.has_service(DOMAIN, SERVICE_SET_OVERRIDE):

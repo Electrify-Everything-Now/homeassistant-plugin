@@ -67,6 +67,8 @@ def mock_anode_api():
         })
         api_instance.get_meter_details = AsyncMock(return_value={
             "power": {"value": 2000.0, "unit": "W"},
+            "importEnergy": {"value": 1000000, "unit": "dWh"},
+            "exportEnergy": {"value": 300000, "unit": "dWh"},
         })
         api_instance.get_mode = AsyncMock(return_value="CHARGE")
         api_instance.get_schedule = AsyncMock(return_value={
@@ -82,13 +84,11 @@ def mock_anode_api():
         api_instance.set_override = AsyncMock(return_value={
             "mode": "CHARGE"
         })
-        api_instance.get_telemetry = AsyncMock(return_value={
-            "import": 500.0,
-            "export": 200.0,
-        })
         api_instance.get_config = AsyncMock(return_value={"config": []})
         api_instance.set_config = AsyncMock(return_value={"status": True})
         api_instance.get_device_metadata = AsyncMock(return_value=[
+            {"friendlyId": "test123", "alias": "My Hub", "meterPurpose": None},
+            {"friendlyId": "battery1", "alias": "My Battery", "meterPurpose": None},
             {"friendlyId": "meter1", "alias": "Grid", "meterPurpose": "primary"},
             {"friendlyId": "meter2", "alias": "Solar", "meterPurpose": "solar"},
         ])

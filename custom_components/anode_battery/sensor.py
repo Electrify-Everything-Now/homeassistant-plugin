@@ -1234,6 +1234,16 @@ class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
         return None
 
 
+def _sum_energy_field(batteries: dict, field: str) -> float | None:
+    """Sum an energy field across all batteries; return None if absent from all of them."""
+    values = [
+        b[field]["value"]
+        for b in batteries.values()
+        if isinstance(b.get(field), dict) and "value" in b[field]
+    ]
+    return sum(values) / 10000 if values else None
+
+
 class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
     """Sensor for total charge energy across all batteries (hardware counter)."""
 
@@ -1257,17 +1267,20 @@ class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hub_id)},
         )
+        self._last_kwh: float | None = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        raw = _sum_energy_field(self.coordinator.data.get("batteries", {}), "importEnergy")
+        if raw is not None:
+            self._last_kwh = raw
+        # If raw is None (importEnergy absent from all batteries this poll),
+        # hold _last_kwh so HA doesn't record a false counter reset.
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> float | None:
-        batteries = self.coordinator.data.get("batteries", {})
-        if not batteries:
-            return None
-        total = sum(
-            b.get("importEnergy", {}).get("value", 0)
-            for b in batteries.values()
-        )
-        return total / 10000
+        return self._last_kwh
 
 
 class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntity):
@@ -1293,17 +1306,18 @@ class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntit
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hub_id)},
         )
+        self._last_kwh: float | None = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        raw = _sum_energy_field(self.coordinator.data.get("batteries", {}), "exportEnergy")
+        if raw is not None:
+            self._last_kwh = raw
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> float | None:
-        batteries = self.coordinator.data.get("batteries", {})
-        if not batteries:
-            return None
-        total = sum(
-            b.get("exportEnergy", {}).get("value", 0)
-            for b in batteries.values()
-        )
-        return total / 10000
+        return self._last_kwh
 
 
 # ---------------------------------------------------------------------------

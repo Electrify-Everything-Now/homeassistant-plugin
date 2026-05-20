@@ -1234,6 +1234,16 @@ class AnodeBatteryDischargeEnergySensor(CoordinatorEntity, SensorEntity):
         return None
 
 
+def _sum_energy_field(batteries: dict, field: str) -> float | None:
+    """Sum an energy field across all batteries; return None if absent from all of them."""
+    values = [
+        b[field]["value"]
+        for b in batteries.values()
+        if isinstance(b.get(field), dict) and "value" in b[field]
+    ]
+    return sum(values) / 10000 if values else None
+
+
 class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
     """Sensor for total charge energy across all batteries (hardware counter)."""
 
@@ -1257,17 +1267,22 @@ class AnodeBatteryCumulativeChargeEnergySensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hub_id)},
         )
+        self._last_kwh: float | None = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        raw = _sum_energy_field(self.coordinator.data.get("batteries", {}), "importEnergy")
+        if raw is not None and (self._last_kwh is None or raw >= self._last_kwh):
+            self._last_kwh = raw
+        elif raw is not None:
+            _LOGGER.warning(
+                "Ignoring charge energy drop: %.3f kWh -> %.3f kWh", self._last_kwh, raw
+            )
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> float | None:
-        batteries = self.coordinator.data.get("batteries", {})
-        if not batteries:
-            return None
-        total = sum(
-            b.get("importEnergy", {}).get("value", 0)
-            for b in batteries.values()
-        )
-        return total / 10000
+        return self._last_kwh
 
 
 class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntity):
@@ -1293,17 +1308,22 @@ class AnodeBatteryCumulativeDischargeEnergySensor(CoordinatorEntity, SensorEntit
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hub_id)},
         )
+        self._last_kwh: float | None = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        raw = _sum_energy_field(self.coordinator.data.get("batteries", {}), "exportEnergy")
+        if raw is not None and (self._last_kwh is None or raw >= self._last_kwh):
+            self._last_kwh = raw
+        elif raw is not None:
+            _LOGGER.warning(
+                "Ignoring discharge energy drop: %.3f kWh -> %.3f kWh", self._last_kwh, raw
+            )
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> float | None:
-        batteries = self.coordinator.data.get("batteries", {})
-        if not batteries:
-            return None
-        total = sum(
-            b.get("exportEnergy", {}).get("value", 0)
-            for b in batteries.values()
-        )
-        return total / 10000
+        return self._last_kwh
 
 
 # ---------------------------------------------------------------------------
@@ -1498,6 +1518,7 @@ class AnodeHubGridImportEnergySensor(CoordinatorEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:transmission-tower-import"
 
     def __init__(
@@ -1512,9 +1533,8 @@ class AnodeHubGridImportEnergySensor(CoordinatorEntity, SensorEntity):
         self._status_coordinator = status_coordinator
         self._attr_unique_id = f"{hub_id}_grid_import_energy"
         self._attr_name = f"Anode Hub {hub_id} Grid Import Energy"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hub_id)},
-        )
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
+        self._last_kwh: float | None = None
 
     def _get_primary_meter_data(self) -> dict | None:
         for meter in self._status_coordinator.data.get("meter", []):
@@ -1522,15 +1542,17 @@ class AnodeHubGridImportEnergySensor(CoordinatorEntity, SensorEntity):
                 return self.coordinator.data.get("meters", {}).get(meter["id"])
         return None
 
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        data = self._get_primary_meter_data()
+        raw = data["importEnergy"].get("value", 0) / 10000 if data and "importEnergy" in data else None
+        if raw is not None and (self._last_kwh is None or raw >= self._last_kwh):
+            self._last_kwh = raw
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> float | None:
-        data = self._get_primary_meter_data()
-        if data and "importEnergy" in data:
-            # Raw meter API returns dWh; convert to kWh
-            return data["importEnergy"].get("value", 0) / 10000
-        return None
+        return self._last_kwh
 
 
 class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
@@ -1538,6 +1560,7 @@ class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:transmission-tower-export"
 
     def __init__(
@@ -1552,9 +1575,8 @@ class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
         self._status_coordinator = status_coordinator
         self._attr_unique_id = f"{hub_id}_grid_export_energy"
         self._attr_name = f"Anode Hub {hub_id} Grid Export Energy"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hub_id)},
-        )
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
+        self._last_kwh: float | None = None
 
     def _get_primary_meter_data(self) -> dict | None:
         for meter in self._status_coordinator.data.get("meter", []):
@@ -1562,15 +1584,17 @@ class AnodeHubGridExportEnergySensor(CoordinatorEntity, SensorEntity):
                 return self.coordinator.data.get("meters", {}).get(meter["id"])
         return None
 
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        data = self._get_primary_meter_data()
+        raw = data["exportEnergy"].get("value", 0) / 10000 if data and "exportEnergy" in data else None
+        if raw is not None and (self._last_kwh is None or raw >= self._last_kwh):
+            self._last_kwh = raw
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> float | None:
-        data = self._get_primary_meter_data()
-        if data and "exportEnergy" in data:
-            # Raw meter API returns dWh; convert to kWh
-            return data["exportEnergy"].get("value", 0) / 10000
-        return None
+        return self._last_kwh
 
 
 # ---------------------------------------------------------------------------
@@ -1671,13 +1695,26 @@ class AnodeHouseEnergySensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{hub_id}_house_energy"
         self._attr_name = f"Anode Hub {hub_id} House Energy"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
+        self._last_kwh: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        raw = _calc_house_energy_total(self.coordinator, self._status_coordinator)
+        if raw is not None:
+            self._last_kwh = round(raw, 3)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        raw = _calc_house_energy_total(self.coordinator, self._status_coordinator)
+        if raw is not None:
+            raw = round(raw, 3)
+            if self._last_kwh is None or raw >= self._last_kwh:
+                self._last_kwh = raw
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> float | None:
-        current = _calc_house_energy_total(self.coordinator, self._status_coordinator)
-        if current is None:
-            return None
-        return round(current, 3)
+        return self._last_kwh
 
 
 # ---------------------------------------------------------------------------
@@ -1748,6 +1785,12 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
                 second=0,
             )
         )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        if self._baseline_kwh is None:
+            self._maybe_rebaseline()
+        super()._handle_coordinator_update()
 
     @callback
     def _midnight_reset(self, _now) -> None:

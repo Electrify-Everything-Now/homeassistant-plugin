@@ -135,15 +135,20 @@ async def test_house_energy_today_starts_at_zero(
     assert state.attributes.get("baseline_kwh") == pytest.approx(-192.263, abs=1e-3)
 
 
-async def test_house_energy_today_rebaselines_on_source_drop(
+async def test_house_energy_holds_on_source_decrease(
     hass: HomeAssistant, init_integration, mock_anode_api
 ) -> None:
-    """If the source drops below baseline, the wrapper rebaselines (doesn't stick at 0)."""
+    """House energy holds its last value when raw calculation decreases.
+
+    The house energy sensor uses hold-last-value to prevent HA TOTAL_INCREASING
+    warnings from floating-point imprecision. If an API update would push the
+    total below the last published value, it is ignored and the sensor stays put.
+    """
     coordinators = hass.data[DOMAIN][init_integration.entry_id]
     device_coordinator = coordinators["device_coordinator"]
 
-    # Baseline starts at ~-192.263 kWh (see test_house_energy_today_starts_at_zero).
-    # Drop the source: charge the battery more so batt_term goes further negative.
+    # Increase importEnergy so the raw projection drops well below the baseline:
+    # New: 70 + (-70) + (730.428 - 2000) = -1269.572 kWh, below -192.263.
     mock_anode_api.get_battery_details = AsyncMock(return_value={
         "power": {"value": 1500.0, "unit": "W"},
         "powerStatus": "CHARGING",
@@ -152,15 +157,18 @@ async def test_house_energy_today_rebaselines_on_source_drop(
         "importEnergy": {"value": 20000000, "unit": "dWh"},  # 2000 kWh (was 922.691)
         "exportEnergy": {"value":  7304280, "unit": "dWh"},  # unchanged
     })
-    # New projection: 70 + (-70) + (730.428 - 2000) = -1269.572 kWh, well below baseline.
     await device_coordinator.async_refresh()
     await hass.async_block_till_done()
 
-    state = hass.states.get("sensor.anode_hub_test123_house_energy_today")
-    assert state is not None
-    # After rebaseline, today returns 0.0 and baseline tracks the new (lower) total.
-    assert float(state.state) == pytest.approx(0.0, abs=1e-3)
-    assert state.attributes.get("baseline_kwh") == pytest.approx(-1269.572, abs=1e-3)
+    # Source holds; today wrapper stays at 0.0 with original baseline.
+    source_state = hass.states.get("sensor.anode_hub_test123_house_energy")
+    assert source_state is not None
+    assert float(source_state.state) == pytest.approx(-192.263, abs=1e-3)
+
+    today_state = hass.states.get("sensor.anode_hub_test123_house_energy_today")
+    assert today_state is not None
+    assert float(today_state.state) == pytest.approx(0.0, abs=1e-3)
+    assert today_state.attributes.get("baseline_kwh") == pytest.approx(-192.263, abs=1e-3)
 
 
 async def test_house_energy_is_stateless(

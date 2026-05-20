@@ -1697,6 +1697,12 @@ class AnodeHouseEnergySensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hub_id)})
         self._last_kwh: float | None = None
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        raw = _calc_house_energy_total(self.coordinator, self._status_coordinator)
+        if raw is not None:
+            self._last_kwh = round(raw, 3)
+
     @callback
     def _handle_coordinator_update(self) -> None:
         raw = _calc_house_energy_total(self.coordinator, self._status_coordinator)
@@ -1779,6 +1785,12 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
                 second=0,
             )
         )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        if self._baseline_kwh is None:
+            self._maybe_rebaseline()
+        super()._handle_coordinator_update()
 
     @callback
     def _midnight_reset(self, _now) -> None:

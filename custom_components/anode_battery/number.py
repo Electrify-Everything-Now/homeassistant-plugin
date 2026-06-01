@@ -209,6 +209,8 @@ class AnodeHubMaxChargePowerNumber(NumberEntity):
         try:
             result = await self._api_client.get_config("maxChargePower")
             value = result.get("value") if isinstance(result, dict) else None
+            if isinstance(value, dict):
+                value = value.get("watts")
             if value is not None:
                 self._attr_native_value = float(value)
                 self.async_write_ha_state()
@@ -258,6 +260,8 @@ class AnodeHubMaxDischargePowerNumber(NumberEntity):
         try:
             result = await self._api_client.get_config("maxDischargePower")
             value = result.get("value") if isinstance(result, dict) else None
+            if isinstance(value, dict):
+                value = value.get("watts")
             if value is not None:
                 self._attr_native_value = float(value)
                 self.async_write_ha_state()

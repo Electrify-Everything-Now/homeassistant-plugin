@@ -1755,6 +1755,7 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
         self._hub_id = hub_id
         self._baseline_kwh: float | None = None
         self._last_reset_day: str | None = None
+        self._last_today_kwh: float | None = None
         self._attr_unique_id = f"{hub_id}_{unique_suffix}"
         self._attr_name = f"Anode Hub {hub_id} {name_suffix}"
         self._attr_icon = icon
@@ -1770,6 +1771,12 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
                 self._baseline_kwh = float(baseline)
             if isinstance(last_day, str):
                 self._last_reset_day = last_day
+            # Restore last published today-value so we don't drop on restart
+            if last_state.state not in (None, "unknown", "unavailable"):
+                try:
+                    self._last_today_kwh = float(last_state.state)
+                except (ValueError, TypeError):
+                    pass
 
         # If we've rolled past midnight while HA was down (or this is the
         # very first run), rebaseline now against the current source value.
@@ -1799,6 +1806,7 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
             return
         self._baseline_kwh = total
         self._last_reset_day = dt_util.now().date().isoformat()
+        self._last_today_kwh = 0.0
         self.async_write_ha_state()
 
     def _current_total(self) -> float | None:
@@ -1821,6 +1829,7 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
         if self._last_reset_day != today or self._baseline_kwh is None:
             self._baseline_kwh = total
             self._last_reset_day = today
+            self._last_today_kwh = 0.0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1833,11 +1842,12 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
     def native_value(self) -> float | None:
         total = self._current_total()
         if total is None or self._baseline_kwh is None:
-            return None
-        # If the source has dropped well below our baseline (hub-side counter
-        # reset, or a logic-basis change in the source sensor), rebaseline to
-        # the new total so we don't sit at 0 until midnight.
+            return self._last_today_kwh
         if total + _REBASELINE_EPSILON_KWH < self._baseline_kwh:
+            # Source dropped (HA restart with fresh counters, transient data
+            # glitch, etc.). Rebaseline silently so future increases compute
+            # correctly, but hold the last published today-value to avoid a
+            # visible TOTAL_INCREASING drop in charts and statistics.
             _LOGGER.warning(
                 "Source for %s dropped below baseline (%.3f → %.3f kWh); rebaselining",
                 self._attr_unique_id,
@@ -1845,5 +1855,10 @@ class AnodeDailyResetEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
                 total,
             )
             self._baseline_kwh = total
-            return 0.0
-        return max(round(total - self._baseline_kwh, 3), 0.0)
+            return self._last_today_kwh
+        result = max(round(total - self._baseline_kwh, 3), 0.0)
+        # Ratchet: only advance _last_today_kwh, never retreat. The midnight
+        # reset is the only thing that intentionally takes it back to 0.
+        if self._last_today_kwh is None or result >= self._last_today_kwh:
+            self._last_today_kwh = result
+        return self._last_today_kwh

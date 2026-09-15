@@ -20,6 +20,7 @@ from .api import (
     AnodeError,
     AnodeHubOfflineError,
     BatteryReading,
+    BmsReading,
     DeviceMetadata,
     HubStatus,
     MeterReading,
@@ -30,6 +31,8 @@ from .api import (
     SocLimits,
 )
 from .const import (
+    BMS_POLL_INTERVAL,
+    BMS_UNSUPPORTED_RECHECK,
     DEFAULT_OVERRIDE_DURATION_MIN,
     DOMAIN,
     MODE_POLL_INTERVAL,
@@ -176,6 +179,8 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
             hass, entry, client, hub_id, name="telemetry", update_interval=update_interval
         )
         self._failing: set[str] = set()
+        self._bms: dict[str, BmsReading] = {}
+        self._bms_due: dict[str, datetime] = {}
 
     async def _async_update_data(self) -> Telemetry:
         batteries, meters = await asyncio.gather(
@@ -199,6 +204,7 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
             self._note_failure("battery", batteries)
         else:
             self._note_success("battery")
+            batteries = await self._async_add_bms(batteries)
             battery_map.update(batteries)
             reported.update(batteries)
 
@@ -217,6 +223,50 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
             batteries_current=not isinstance(batteries, AnodeError),
             meters_current=not isinstance(meters, AnodeError),
         )
+
+    async def _async_add_bms(
+        self, batteries: dict[str, BatteryReading]
+    ) -> dict[str, BatteryReading]:
+        """Fill in BMS data for batteries whose all-batteries reading lacks it.
+
+        Current firmware only includes BMS data when a battery is read on its
+        own, so those batteries are read individually every BMS_POLL_INTERVAL
+        and the result reused in between. A battery whose own reading has no
+        BMS data is re-checked hourly. When the all-batteries read includes
+        BMS data, no extra requests are made.
+        """
+        now = dt_util.utcnow()
+        due = [
+            battery_id
+            for battery_id, reading in batteries.items()
+            if reading.bms is None and self._bms_due.get(battery_id, now) <= now
+        ]
+        results = await asyncio.gather(
+            *(self.client.get_battery(self.hub_id, battery_id) for battery_id in due),
+            return_exceptions=True,
+        )
+        for battery_id, result in zip(due, results, strict=True):
+            if isinstance(result, AnodeAuthError) or (
+                isinstance(result, BaseException) and not isinstance(result, AnodeError)
+            ):
+                self._raise_update_error("battery BMS data", result)
+            if isinstance(result, AnodeError):
+                # Keep the last BMS values; they change slowly.
+                _LOGGER.debug("Could not read BMS data for battery %s: %s", battery_id, result)
+                self._bms_due[battery_id] = now + BMS_POLL_INTERVAL
+            elif result.bms is None:
+                self._bms.pop(battery_id, None)
+                self._bms_due[battery_id] = now + BMS_UNSUPPORTED_RECHECK
+            else:
+                self._bms[battery_id] = result.bms
+                self._bms_due[battery_id] = now + BMS_POLL_INTERVAL
+
+        return {
+            battery_id: replace(reading, bms=self._bms[battery_id])
+            if reading.bms is None and battery_id in self._bms
+            else reading
+            for battery_id, reading in batteries.items()
+        }
 
     def _note_failure(self, kind: str, err: AnodeError) -> None:
         if kind not in self._failing:

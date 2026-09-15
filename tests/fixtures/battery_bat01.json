@@ -1,0 +1,16 @@
+{
+  "power": { "value": 1500, "unit": "W" },
+  "powerStatus": "CHARGING",
+  "soc": { "value": 75, "unit": "%" },
+  "capacity": { "value": 136, "nominalVoltage": 44.4, "calibrated": true, "calibrating": false, "storage": false },
+  "bms": {
+    "voltageAct": { "value": 46.101, "unit": "V" },
+    "ntcTemp": { "values": [23.5, 23.7], "unit": "°C" },
+    "cells": {
+      "values": [3842, 3848, 3848, 3848, 3847, 3847, 3848, 3848, 3847, 3848, 3847, 3842],
+      "unit": "mV"
+    }
+  },
+  "importEnergy": { "value": 9226910, "unit": "dWh" },
+  "exportEnergy": { "value": 7304280, "unit": "dWh" }
+}

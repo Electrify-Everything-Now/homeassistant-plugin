@@ -47,6 +47,7 @@ class PowerLimitKey(StrEnum):
 _POWER_TO_W = {"w": 1.0, "kw": 1000.0, "": 1.0}
 # Hardware counters are reported in deci-watt-hours (0.1 Wh).
 _ENERGY_TO_KWH = {"dwh": 1 / 10000, "wh": 1 / 1000, "kwh": 1.0}
+_VOLTAGE_TO_V = {"v": 1.0, "mv": 1 / 1000}
 
 
 def require_dict(data: Any, what: str) -> dict[str, Any]:
@@ -249,6 +250,78 @@ def _parse_sub_devices(items: Any) -> dict[str, SubDevice]:
     return devices
 
 
+def _unit_values(data: dict[str, Any], key: str) -> tuple[list[float], str] | None:
+    """Read a ``{"values": [...], "unit": "..."}`` field.
+
+    The whole list is dropped if any entry is unreadable, so positions (cell
+    or probe numbers) never shift.
+    """
+    entry = data.get(key)
+    if not isinstance(entry, dict) or not isinstance(entry.get("values"), list):
+        return None
+    values = [_number(value) for value in entry["values"]]
+    if any(value is None for value in values):
+        _LOGGER.warning("Ignoring %s with unreadable values: %s", key, entry["values"])
+        return None
+    unit = entry.get("unit")
+    return values, unit if isinstance(unit, str) else ""
+
+
+def _to_celsius(value: float, unit: str) -> float | None:
+    unit = unit.replace("°", "").strip().lower()
+    if unit in ("c", "degc", "celsius"):
+        return value
+    if unit in ("f", "degf", "fahrenheit"):
+        return (value - 32) * 5 / 9
+    if unit in ("k", "kelvin"):
+        return value - 273.15
+    return None
+
+
+def _temperatures(bms: dict[str, Any]) -> tuple[float, ...]:
+    if (parsed := _unit_values(bms, "ntcTemp")) is None:
+        return ()
+    values, unit = parsed
+    celsius = [_to_celsius(value, unit) for value in values]
+    if any(value is None for value in celsius):
+        _LOGGER.warning("Ignoring temperatures with unrecognised unit %r", unit)
+        return ()
+    return tuple(celsius)
+
+
+def _cell_voltages(bms: dict[str, Any]) -> tuple[float, ...]:
+    if (parsed := _unit_values(bms, "cells")) is None:
+        return ()
+    values, unit = parsed
+    if (factor := _VOLTAGE_TO_V.get(unit.lower())) is None:
+        _LOGGER.warning("Ignoring cell voltages with unrecognised unit %r", unit)
+        return ()
+    return tuple(value * factor for value in values)
+
+
+@dataclass(frozen=True, slots=True)
+class BmsReading:
+    """Battery management system readings: pack voltage, probes and cells."""
+
+    pack_voltage_v: float | None = None
+    temperatures_c: tuple[float, ...] = ()
+    cell_voltages_v: tuple[float, ...] = ()
+
+    @classmethod
+    def from_api(cls, data: Any) -> BmsReading | None:
+        """Parse a ``bms`` block; None if it is missing or empty."""
+        if not isinstance(data, dict):
+            return None
+        reading = cls(
+            pack_voltage_v=_unit_value(data, "voltageAct", _VOLTAGE_TO_V),
+            temperatures_c=_temperatures(data),
+            cell_voltages_v=_cell_voltages(data),
+        )
+        if reading == cls():
+            return None
+        return reading
+
+
 @dataclass(frozen=True, slots=True)
 class BatteryReading:
     """Live readings for one battery."""
@@ -261,6 +334,9 @@ class BatteryReading:
     calibrated: bool | None = None
     charge_energy_kwh: float | None = None
     discharge_energy_kwh: float | None = None
+    # Absent on older battery firmware. Current firmware only includes it
+    # when a battery is read on its own, not in the all-batteries read.
+    bms: BmsReading | None = None
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> BatteryReading:
@@ -279,7 +355,50 @@ class BatteryReading:
             calibrated=_bool(capacity.get("calibrated")),
             charge_energy_kwh=_unit_value(data, "importEnergy", _ENERGY_TO_KWH),
             discharge_energy_kwh=_unit_value(data, "exportEnergy", _ENERGY_TO_KWH),
+            bms=BmsReading.from_api(data.get("bms")),
         )
+
+    @property
+    def pack_voltage_v(self) -> float | None:
+        """Measured pack voltage."""
+        return self.bms.pack_voltage_v if self.bms else None
+
+    @property
+    def temperatures_c(self) -> tuple[float, ...]:
+        """Temperature probe readings, in probe order."""
+        return self.bms.temperatures_c if self.bms else ()
+
+    @property
+    def cell_voltages_v(self) -> tuple[float, ...]:
+        """Cell voltages, in cell order."""
+        return self.bms.cell_voltages_v if self.bms else ()
+
+    @property
+    def max_temperature_c(self) -> float | None:
+        """Warmest temperature probe."""
+        return max(self.temperatures_c) if self.temperatures_c else None
+
+    @property
+    def min_temperature_c(self) -> float | None:
+        """Coolest temperature probe."""
+        return min(self.temperatures_c) if self.temperatures_c else None
+
+    @property
+    def max_cell_voltage_v(self) -> float | None:
+        """Highest cell voltage."""
+        return max(self.cell_voltages_v) if self.cell_voltages_v else None
+
+    @property
+    def min_cell_voltage_v(self) -> float | None:
+        """Lowest cell voltage."""
+        return min(self.cell_voltages_v) if self.cell_voltages_v else None
+
+    @property
+    def cell_voltage_difference_mv(self) -> float | None:
+        """Gap between the highest and lowest cell, in millivolts."""
+        if not self.cell_voltages_v:
+            return None
+        return (max(self.cell_voltages_v) - min(self.cell_voltages_v)) * 1000
 
     @property
     def capacity_remaining_ah(self) -> float | None:

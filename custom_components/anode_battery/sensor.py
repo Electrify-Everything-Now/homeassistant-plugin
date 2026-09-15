@@ -21,6 +21,7 @@ from homeassistant.const import (
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfPower,
+    UnitOfTemperature,
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
@@ -83,6 +84,16 @@ class AnodeBatterySensorDescription(SensorEntityDescription):
     """A battery sensor read from telemetry."""
 
     value_fn: Callable[[BatteryReading], StateType]
+    exists_fn: Callable[[BatteryReading], bool] = lambda _: True
+
+
+@dataclass(frozen=True, kw_only=True)
+class AnodeBatteryIndexedSensorDescription(SensorEntityDescription):
+    """One sensor per value in a battery list reading, such as cell voltages."""
+
+    values_fn: Callable[[BatteryReading], tuple[float, ...]]
+    # Translation placeholder filled with the 1-based position.
+    placeholder: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -234,6 +245,99 @@ BATTERY_SENSORS: tuple[AnodeBatterySensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         value_fn=lambda b: _round(b.discharge_energy_kwh, 4),
+    ),
+)
+
+BATTERY_BMS_SENSORS: tuple[AnodeBatterySensorDescription, ...] = (
+    AnodeBatterySensorDescription(
+        key="pack_voltage",
+        translation_key="pack_voltage",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        suggested_display_precision=2,
+        exists_fn=lambda b: b.pack_voltage_v is not None,
+        value_fn=lambda b: b.pack_voltage_v,
+    ),
+    AnodeBatterySensorDescription(
+        key="max_temperature",
+        translation_key="max_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_display_precision=1,
+        exists_fn=lambda b: bool(b.temperatures_c),
+        value_fn=lambda b: b.max_temperature_c,
+    ),
+    AnodeBatterySensorDescription(
+        key="min_temperature",
+        translation_key="min_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_display_precision=1,
+        entity_registry_enabled_default=False,
+        exists_fn=lambda b: bool(b.temperatures_c),
+        value_fn=lambda b: b.min_temperature_c,
+    ),
+    AnodeBatterySensorDescription(
+        key="cell_voltage_difference",
+        translation_key="cell_voltage_difference",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.MILLIVOLT,
+        suggested_display_precision=0,
+        exists_fn=lambda b: bool(b.cell_voltages_v),
+        value_fn=lambda b: _round(b.cell_voltage_difference_mv, 1),
+    ),
+    AnodeBatterySensorDescription(
+        key="max_cell_voltage",
+        translation_key="max_cell_voltage",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        suggested_display_precision=3,
+        entity_registry_enabled_default=False,
+        exists_fn=lambda b: bool(b.cell_voltages_v),
+        value_fn=lambda b: _round(b.max_cell_voltage_v, 4),
+    ),
+    AnodeBatterySensorDescription(
+        key="min_cell_voltage",
+        translation_key="min_cell_voltage",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        suggested_display_precision=3,
+        entity_registry_enabled_default=False,
+        exists_fn=lambda b: bool(b.cell_voltages_v),
+        value_fn=lambda b: _round(b.min_cell_voltage_v, 4),
+    ),
+)
+
+BATTERY_INDEXED_SENSORS: tuple[AnodeBatteryIndexedSensorDescription, ...] = (
+    AnodeBatteryIndexedSensorDescription(
+        key="temperature",
+        translation_key="temperature_probe",
+        placeholder="probe",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_display_precision=1,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        values_fn=lambda b: b.temperatures_c,
+    ),
+    AnodeBatteryIndexedSensorDescription(
+        key="cell_voltage",
+        translation_key="cell_voltage",
+        placeholder="cell",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        suggested_display_precision=3,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        values_fn=lambda b: b.cell_voltages_v,
     ),
 )
 
@@ -751,6 +855,59 @@ async def async_setup_entry(
                     yield AnodeSubDeviceSensor(runtime.status, meter.id, description)
 
     async_setup_dynamic_entities(entry, async_add_entities, build)
+
+    def build_bms() -> Iterator[Entity]:
+        # BMS readings depend on battery firmware, so these entities are
+        # created from telemetry once a battery reports them.
+        status, telemetry = runtime.status.data, runtime.telemetry.data
+        if telemetry is None:
+            return
+        for battery_id in status.batteries:
+            if (reading := telemetry.batteries.get(battery_id)) is None:
+                continue
+            for description in BATTERY_BMS_SENSORS:
+                if description.exists_fn(reading):
+                    yield AnodeBatterySensor(runtime.telemetry, battery_id, description)
+            for indexed in BATTERY_INDEXED_SENSORS:
+                for index in range(len(indexed.values_fn(reading))):
+                    yield AnodeBatteryIndexedSensor(runtime.telemetry, battery_id, indexed, index)
+
+    async_setup_dynamic_entities(entry, async_add_entities, build_bms, runtime.telemetry)
+
+
+class AnodeBatteryIndexedSensor(AnodeEntity[AnodeTelemetryCoordinator], SensorEntity):
+    """One value from a battery list reading, such as cell 3's voltage."""
+
+    entity_description: AnodeBatteryIndexedSensorDescription
+
+    def __init__(
+        self,
+        coordinator: AnodeTelemetryCoordinator,
+        battery_id: str,
+        description: AnodeBatteryIndexedSensorDescription,
+        index: int,
+    ) -> None:
+        super().__init__(coordinator, battery_id, f"{description.key}_{index + 1}")
+        self.entity_description = description
+        self._index = index
+        self._attr_translation_placeholders = {description.placeholder: str(index + 1)}
+
+    def _values(self) -> tuple[float, ...]:
+        reading = self.coordinator.data.batteries.get(self._device_id)
+        return self.entity_description.values_fn(reading) if reading else ()
+
+    @property
+    def available(self) -> bool:
+        return (
+            super().available
+            and self.coordinator.data.is_current(self._device_id)
+            and self._index < len(self._values())
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        values = self._values()
+        return values[self._index] if self._index < len(values) else None
 
 
 class AnodeHubStatusSensor(AnodeEntity[AnodeStatusCoordinator], SensorEntity):

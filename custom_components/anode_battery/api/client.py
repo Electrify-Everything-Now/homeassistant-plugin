@@ -136,6 +136,18 @@ class AnodeClient:
         """Return readings for every battery the hub is using, in one request."""
         return parse_batteries(await self._request("GET", f"/device/battery/{_hub(hub_id)}"))
 
+    async def get_battery(self, hub_id: str, battery_id: str) -> BatteryReading:
+        """Return readings for one battery.
+
+        Current firmware includes BMS data here but not in ``get_batteries``.
+        """
+        data = await self._request(
+            "GET", f"/device/battery/{_hub(hub_id)}", params={"id": battery_id}
+        )
+        data = require_dict(data, f"battery {battery_id}")
+        raise_for_hub_failure(data, f"the battery {battery_id} read")
+        return BatteryReading.from_api(data)
+
     async def get_meters(self, hub_id: str) -> dict[str, MeterReading]:
         """Return readings for every meter the hub is using, in one request."""
         return parse_meters(await self._request("GET", f"/device/meter/{_hub(hub_id)}"))

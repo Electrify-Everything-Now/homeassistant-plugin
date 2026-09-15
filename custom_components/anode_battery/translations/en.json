@@ -221,6 +221,30 @@
       },
       "parent_meter": {
         "name": "Parent meter"
+      },
+      "pack_voltage": {
+        "name": "Pack voltage"
+      },
+      "max_temperature": {
+        "name": "Highest temperature"
+      },
+      "min_temperature": {
+        "name": "Lowest temperature"
+      },
+      "cell_voltage_difference": {
+        "name": "Cell voltage difference"
+      },
+      "max_cell_voltage": {
+        "name": "Highest cell voltage"
+      },
+      "min_cell_voltage": {
+        "name": "Lowest cell voltage"
+      },
+      "temperature_probe": {
+        "name": "Temperature {probe}"
+      },
+      "cell_voltage": {
+        "name": "Cell {cell} voltage"
       }
     }
   },

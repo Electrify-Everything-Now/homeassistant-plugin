@@ -18,6 +18,7 @@ from .exceptions import (
 from .models import (
     AccountHub,
     BatteryReading,
+    BmsReading,
     DeviceMetadata,
     HubStatus,
     MeterReading,
@@ -44,6 +45,7 @@ __all__ = [
     "AnodeRateLimitError",
     "AnodeResponseError",
     "BatteryReading",
+    "BmsReading",
     "DeviceMetadata",
     "HubStatus",
     "MeterReading",

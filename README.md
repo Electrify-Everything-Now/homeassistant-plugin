@@ -36,6 +36,8 @@ Open **Settings → Devices & services → Anode → Configure**.
 
 Both have a minimum of 10 seconds. Each read is relayed from the Anode cloud to the hub over the internet. The mode and schedule are read every 5 minutes and just after each scheduled change. Battery limits are read every 10 minutes.
 
+Battery BMS readings (pack voltage, temperatures and cell voltages) need a separate request per battery, so they are read every 2 minutes. A battery whose firmware does not report them is checked again every hour.
+
 ### Changing credentials
 
 Choose **Reconfigure** from the integration's menu. If Anode stops accepting the API key, Home Assistant asks you to re-authenticate.
@@ -77,6 +79,11 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Energy capacity, Energy remaining | Watt-hours |
 | Power status | For example `CHARGING`, `DISCHARGED` or a fault code |
 | Charge energy, Discharge energy | Lifetime counters in kWh |
+| Pack voltage | Measured battery voltage |
+| Highest temperature | The warmest of the battery's temperature probes |
+| Cell voltage difference | Gap between the highest and lowest cell, in mV. A widening gap means the cells are drifting out of balance |
+| Lowest temperature, Highest cell voltage, Lowest cell voltage | Disabled by default. Enable them from the entity's settings |
+| Temperature *n*, Cell *n* voltage | One per probe and per cell. Disabled by default |
 | Minimum state of charge, Maximum state of charge | The battery's operating window |
 | Online | Whether the hub reports the battery as connected |
 | Nominal voltage, Firmware version, Uptime | Diagnostic |

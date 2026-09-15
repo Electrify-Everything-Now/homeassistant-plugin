@@ -19,6 +19,11 @@ MIN_UPDATE_INTERVAL: Final = 10
 
 MODE_POLL_INTERVAL: Final = timedelta(minutes=5)
 SETTINGS_POLL_INTERVAL: Final = timedelta(minutes=10)
+# BMS data needs one request per battery on current firmware, so it is read
+# less often than power and energy. Batteries that report none are re-checked
+# in case their firmware is updated.
+BMS_POLL_INTERVAL: Final = timedelta(minutes=2)
+BMS_UNSUPPORTED_RECHECK: Final = timedelta(hours=1)
 # Wait this long after a schedule boundary or an override command before
 # re-reading the mode, so we see the mode the hub switched to.
 MODE_SETTLE_DELAY: Final = timedelta(seconds=5)

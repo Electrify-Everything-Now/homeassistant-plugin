@@ -67,6 +67,21 @@ EXPECTED_UNIQUE_IDS = {
                 "uptime",
             )
         ),
+        # BMS sensors: only bat01's firmware reports BMS data in the fixtures.
+        *(
+            f"bat01_{key}"
+            for key in (
+                "pack_voltage",
+                "max_temperature",
+                "min_temperature",
+                "cell_voltage_difference",
+                "max_cell_voltage",
+                "min_cell_voltage",
+                "temperature_1",
+                "temperature_2",
+                *(f"cell_voltage_{cell}" for cell in range(1, 13)),
+            )
+        ),
         *(
             f"{meter}_{key}"
             for meter in ("grid1", "solar1", "ev001")

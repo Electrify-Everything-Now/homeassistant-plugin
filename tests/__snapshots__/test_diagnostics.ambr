@@ -135,6 +135,27 @@
       'data': dict({
         'batteries': dict({
           'bat01': dict({
+            'bms': dict({
+              'cell_voltages_v': list([
+                3.842,
+                3.848,
+                3.848,
+                3.848,
+                3.847,
+                3.847,
+                3.848,
+                3.848,
+                3.847,
+                3.848,
+                3.847,
+                3.842,
+              ]),
+              'pack_voltage_v': 46.101,
+              'temperatures_c': list([
+                23.5,
+                23.7,
+              ]),
+            }),
             'calibrated': True,
             'capacity_ah': 136.0,
             'charge_energy_kwh': 922.691,
@@ -145,6 +166,7 @@
             'soc_pct': 75.0,
           }),
           'bat02': dict({
+            'bms': None,
             'calibrated': True,
             'capacity_ah': 100.0,
             'charge_energy_kwh': 500.0,

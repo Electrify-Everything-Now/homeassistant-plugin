@@ -141,6 +141,21 @@
       "grid_export_energy": {
         "name": "Grid export energy"
       },
+      "grid_import_energy_today": {
+        "name": "Grid import energy today"
+      },
+      "grid_export_energy_today": {
+        "name": "Grid export energy today"
+      },
+      "house_energy_today": {
+        "name": "House energy today"
+      },
+      "battery_charge_energy_today": {
+        "name": "Battery charge energy today"
+      },
+      "battery_discharge_energy_today": {
+        "name": "Battery discharge energy today"
+      },
       "total_battery_charge_energy": {
         "name": "Battery charge energy"
       },
@@ -243,8 +258,8 @@
   },
   "issues": {
     "retired_entities": {
-      "title": "Some Anode entities were removed",
-      "description": "This version of the Anode integration removed these entities:\n\n{entities}\n\n- **Energy today** sensors: the Energy dashboard calculates daily totals from the lifetime energy sensors. For a daily total anywhere else, create a **Utility meter** helper with a daily reset cycle.\n- **Charge, Discharge, Idle and Match override** selects: use **Override mode** and **Override duration** on the hub device, or the **Anode: Set override** action.\n\nUpdate any dashboards and automations that used these entities, then dismiss this message."
+      "title": "Anode override selects were replaced",
+      "description": "This version of the Anode integration removed the Charge, Discharge, Idle and Match override selects:\n\n{entities}\n\nUse **Override mode** and **Override duration** on the hub device instead, or the **Anode: Set override** action. Update any dashboards and automations that used the old selects, then dismiss this message."
     }
   },
   "services": {

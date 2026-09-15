@@ -26,7 +26,6 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     REMOVED_HUB_SELECT_KEYS,
-    REMOVED_HUB_SENSOR_KEYS,
 )
 from .coordinator import (
     AnodeConfigEntry,
@@ -136,12 +135,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> b
 
 @callback
 def _async_remove_retired_entities(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
-    """Remove entities dropped in 1.2 and tell the user what replaces them."""
+    """Remove the override selects dropped in 1.2 and tell the user what replaces them."""
     registry = er.async_get(hass)
     hub_id = entry.data[CONF_HUB_ID]
-    retired = {("sensor", f"{hub_id}_{key}") for key in REMOVED_HUB_SENSOR_KEYS} | {
-        ("select", f"{hub_id}_{key}") for key in REMOVED_HUB_SELECT_KEYS
-    }
+    retired = {("select", f"{hub_id}_{key}") for key in REMOVED_HUB_SELECT_KEYS}
     removed: list[str] = []
     for registry_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
         if (registry_entry.domain, registry_entry.unique_id) in retired:

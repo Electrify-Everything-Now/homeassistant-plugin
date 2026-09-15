@@ -69,6 +69,21 @@
       "grid_export_energy": {
         "default": "mdi:transmission-tower-export"
       },
+      "grid_import_energy_today": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "grid_export_energy_today": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "house_energy_today": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "battery_charge_energy_today": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_discharge_energy_today": {
+        "default": "mdi:battery-minus"
+      },
       "total_battery_charge_energy": {
         "default": "mdi:battery-charging"
       },

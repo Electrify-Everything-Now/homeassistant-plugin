@@ -40,6 +40,11 @@ EXPECTED_UNIQUE_IDS = {
                 "grid_export_energy",
                 "house_power",
                 "house_energy",
+                "battery_charge_energy_today",
+                "battery_discharge_energy_today",
+                "grid_import_energy_today",
+                "grid_export_energy_today",
+                "house_energy_today",
             )
         ),
         *(
@@ -245,18 +250,16 @@ async def test_migration_removes_retired_entities(hass: HomeAssistant, cloud: An
     await hass.async_block_till_done()
 
     assert entry.minor_version == 2
-    assert registry.async_get("sensor.anode_hub_ehxbt_house_energy_today") is None
     assert registry.async_get("select.anode_hub_ehxbt_charge_override") is None
     # Kept entities keep their original entity ids.
-    assert hass.states.get("sensor.anode_hub_ehxbt_grid_import_energy") is not None
-    assert hass.states.get("sensor.anode_hub_ehxbt_house_energy") is not None
+    for kept in ("house_energy_today", "grid_import_energy", "house_energy"):
+        assert hass.states.get(f"sensor.anode_hub_ehxbt_{kept}") is not None
 
     issue = ir.async_get(hass).async_get_issue(DOMAIN, f"retired_entities_{entry.entry_id}")
     assert issue is not None
-    entities = issue.translation_placeholders["entities"]
-    assert "sensor.anode_hub_ehxbt_house_energy_today" in entities
-    assert "select.anode_hub_ehxbt_charge_override" in entities
-    assert "grid_import_energy" not in entities
+    assert (
+        issue.translation_placeholders["entities"] == "- `select.anode_hub_ehxbt_charge_override`"
+    )
 
 
 async def test_migration_without_retired_entities(hass: HomeAssistant, cloud: AnodeCloud) -> None:

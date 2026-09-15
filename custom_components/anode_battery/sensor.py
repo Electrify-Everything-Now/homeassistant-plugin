@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass, replace
+from datetime import date, datetime
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import (
     RestoreSensor,
@@ -25,7 +26,10 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
 
 from .api import BatteryReading, HubStatus, MeterReading, OperatingMode, SubDevice
 from .const import ENERGY_DROP_TOLERANCE_KWH
@@ -560,6 +564,158 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
     ),
 )
 
+_HUB_TELEMETRY_BY_KEY = {description.key: description for description in HUB_TELEMETRY_SENSORS}
+
+# Energy since local midnight for each lifetime total: (today key, total key).
+DAILY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = tuple(
+    replace(_HUB_TELEMETRY_BY_KEY[total], key=key, translation_key=key, monotonic=False)
+    for key, total in (
+        ("battery_charge_energy_today", "battery_cumulative_charge_energy"),
+        ("battery_discharge_energy_today", "battery_cumulative_discharge_energy"),
+        ("grid_import_energy_today", "grid_import_energy"),
+        ("grid_export_energy_today", "grid_export_energy"),
+        ("house_energy_today", "house_energy"),
+    )
+)
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass
+class DailyEnergyStoredData(ExtraStoredData):
+    """What a daily energy sensor needs to carry on after a restart."""
+
+    today: float | None
+    baseline: float | None
+    last_total: float | None
+    day: str | None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a dict for storage."""
+        return asdict(self)
+
+
+class AnodeDailyEnergySensor(AnodeEntity[AnodeTelemetryCoordinator], SensorEntity, RestoreEntity):
+    """Energy since local midnight, from one of the hub's lifetime totals.
+
+    Today's figure is the lifetime total minus a baseline: the last total seen
+    before midnight. If the total falls during the day (a counter reset or a
+    replaced device), the baseline moves so today's figure is kept and counting
+    carries on. The baseline is restored after a restart, so energy used while
+    Home Assistant was stopped still counts.
+    """
+
+    entity_description: AnodeHubTelemetrySensorDescription
+
+    def __init__(
+        self, runtime: AnodeRuntimeData, description: AnodeHubTelemetrySensorDescription
+    ) -> None:
+        super().__init__(runtime.telemetry, runtime.hub_id, description.key)
+        self.entity_description = description
+        self._status = runtime.status
+        self._today: float | None = None
+        self._baseline: float | None = None
+        self._last_total: float | None = None
+        self._day: date | None = None
+        self._has_input = False
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        await self._async_restore()
+        self._recalculate()
+        self.async_on_remove(
+            async_track_time_change(self.hass, self._async_midnight, hour=0, minute=0, second=0)
+        )
+
+    async def _async_restore(self) -> None:
+        if (extra := await self.async_get_last_extra_data()) is not None:
+            data = extra.as_dict()
+            self._today = _float(data.get("today"))
+            self._baseline = _float(data.get("baseline"))
+            self._last_total = _float(data.get("last_total"))
+            self._day = _date(data.get("day"))
+            return
+        # Releases before 0.2 kept the baseline in state attributes.
+        if (last := await self.async_get_last_state()) is None:
+            return
+        self._today = _float(last.state)
+        self._baseline = _float(last.attributes.get("baseline_kwh"))
+        self._day = _date(last.attributes.get("last_reset_day"))
+        if self._today is not None and self._baseline is not None:
+            self._last_total = self._baseline + self._today
+
+    def _start_day(self, day: date) -> None:
+        self._day = day
+        self._today = 0.0
+        # Count from the last total seen, so energy used between that reading
+        # and the first one today is not lost. None on a first run.
+        self._baseline = self._last_total
+
+    @callback
+    def _async_midnight(self, now: datetime) -> None:
+        self._start_day(dt_util.as_local(now).date())
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._recalculate()
+        super()._handle_coordinator_update()
+
+    def _recalculate(self) -> None:
+        if self._day != (day := dt_util.now().date()):
+            self._start_day(day)
+        status, telemetry = self._status.data, self.coordinator.data
+        total = (
+            self.entity_description.value_fn(status, telemetry)
+            if status is not None and telemetry is not None
+            else None
+        )
+        self._has_input = total is not None
+        if total is None:
+            return
+        total = round(total, 3)
+        if self._baseline is None:
+            self._baseline = total
+        so_far = self._today or 0.0
+        today = total - self._baseline
+        if today < so_far:
+            if so_far - today > ENERGY_DROP_TOLERANCE_KWH:
+                # The lifetime total fell. Keep today's figure and count on
+                # from the new total.
+                self._baseline = total - so_far
+            today = so_far
+        self._today = round(today, 3)
+        self._last_total = total
+
+    @property
+    def extra_restore_state_data(self) -> DailyEnergyStoredData:
+        return DailyEnergyStoredData(
+            today=self._today,
+            baseline=self._baseline,
+            last_total=self._last_total,
+            day=self._day.isoformat() if self._day else None,
+        )
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._has_input
+
+    @property
+    def native_value(self) -> float | None:
+        return self._today
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -578,6 +734,9 @@ async def async_setup_entry(
         for description in HUB_TELEMETRY_SENSORS:
             if description.exists_fn(status):
                 yield AnodeHubTelemetrySensor(runtime, description)
+        for description in DAILY_SENSORS:
+            if description.exists_fn(status):
+                yield AnodeDailyEnergySensor(runtime, description)
         for battery in status.batteries.values():
             for description in BATTERY_SENSORS:
                 yield AnodeBatterySensor(runtime.telemetry, battery.id, description)

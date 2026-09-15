@@ -62,6 +62,7 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | House power | Grid power minus generation and battery power. Created when a grid meter exists |
 | House energy | Lifetime net house consumption. Created when a grid meter exists |
 | Battery charge energy, Battery discharge energy | Lifetime totals across all batteries |
+| Grid import energy today, Grid export energy today, House energy today, Battery charge energy today, Battery discharge energy today | Energy since midnight. See [Energy today](#energy-today) |
 | Battery energy capacity, Battery energy remaining, Average state of charge | Totals and capacity-weighted average across batteries |
 | Firmware version, Uptime | Diagnostic |
 
@@ -105,7 +106,16 @@ A meter is treated as a grid meter when its type is `PRIMARY` or its purpose in 
 
 The hub's grid sensors keep working if the grid meter is replaced or a second one is added, so the Energy dashboard does not need changing. The grid meter's own **Import energy** and **Export energy** sensors report the same counters.
 
-The Energy dashboard calculates daily, weekly and monthly totals itself. For a daily total elsewhere, create a **Utility meter** helper on a lifetime energy sensor with a daily reset cycle.
+Use the lifetime sensors here, not the **… today** sensors: the Energy dashboard calculates daily, weekly and monthly totals itself.
+
+### Energy today
+
+Each hub lifetime total has a **today** version for dashboards and automations: grid import, grid export, house, battery charge and battery discharge.
+
+- They return to 0 at midnight in Home Assistant's time zone.
+- Energy used while Home Assistant is stopped still counts, towards the day it starts again.
+- If a lifetime total drops, for example after a meter or battery is replaced, today's figure keeps its value and carries on counting.
+- They are unavailable while readings cannot be fetched, and pick up where they left off afterwards.
 
 ## Overriding the schedule
 
@@ -187,9 +197,8 @@ automation:
 
 Entity IDs and history carry over. Changes you may notice:
 
-- **Removed entities.** A repair notice lists any that were removed from your system:
-  - The five **Energy today** sensors. Use the Energy dashboard, or a Utility meter helper, instead.
-  - The **Charge / Discharge / Idle / Match override** selects. Use **Override mode** and **Override duration**.
+- **The Charge / Discharge / Idle / Match override selects are removed.** Use **Override mode** and **Override duration** instead. A repair notice lists the ones removed from your system.
+- **Energy today** sensors keep today's figure through the upgrade. They no longer lose it when a lifetime total drops or Home Assistant restarts.
 - **Minimum and maximum state of charge** now show the hub's values. Previously they stayed unknown.
 - **Cancel override** now sends `MATCH` for 0 seconds, which the Anode API documents as returning to the schedule. Previously it sent `IDLE`.
 - **House power** is created for any hub with a grid meter, not only hubs with an external inverter.

@@ -30,14 +30,7 @@ MAX_OVERRIDE_DURATION_MIN: Final = 7 * 24 * 60
 # than this rather than logging them.
 ENERGY_DROP_TOLERANCE_KWH: Final = 0.01
 
-# Unique-id suffixes of entities removed in config entry version 1.2.
-REMOVED_HUB_SENSOR_KEYS: Final = (
-    "battery_charge_energy_today",
-    "battery_discharge_energy_today",
-    "grid_import_energy_today",
-    "grid_export_energy_today",
-    "house_energy_today",
-)
+# Unique-id suffixes of the selects removed in config entry version 1.2.
 REMOVED_HUB_SELECT_KEYS: Final = (
     "charge_override",
     "discharge_override",

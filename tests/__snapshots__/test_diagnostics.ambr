@@ -1,0 +1,221 @@
+# serializer version: 1
+# name: test_diagnostics
+  dict({
+    'entry': dict({
+      'data': dict({
+        'api_key': '**REDACTED**',
+        'email': '**REDACTED**',
+        'hub_id': 'ehxbt',
+      }),
+      'options': dict({
+      }),
+      'version': '1.2',
+    }),
+    'mode': dict({
+      'data': dict({
+        'active_slot': None,
+        'mode': <OperatingMode.CHARGE: 'CHARGE'>,
+        'next_change': '2026-09-15T16:00:00+01:00',
+        'next_mode': <OperatingMode.DISCHARGE: 'DISCHARGE'>,
+        'schedule': list([
+          dict({
+            'begin': '01:00:00',
+            'end': '06:00:00',
+            'mode': <OperatingMode.CHARGE: 'CHARGE'>,
+            'target_soc': None,
+          }),
+          dict({
+            'begin': '16:00:00',
+            'end': '19:00:00',
+            'mode': <OperatingMode.DISCHARGE: 'DISCHARGE'>,
+            'target_soc': None,
+          }),
+        ]),
+        'scheduled_mode': <OperatingMode.MATCH: 'MATCH'>,
+      }),
+      'last_exception': None,
+      'last_update_success': True,
+      'update_interval': '0:05:00',
+    }),
+    'override_duration_min': 60,
+    'settings': dict({
+      'data': dict({
+        'power_limits': dict({
+          'maxChargePower': dict({
+            'percent': 100.0,
+            'watts': 4400.0,
+          }),
+          'maxDischargePower': dict({
+            'percent': 80.0,
+            'watts': 3520.0,
+          }),
+        }),
+        'soc_limits': dict({
+          'bat01': dict({
+            'max_soc': 90,
+            'min_soc': 10,
+          }),
+          'bat02': dict({
+            'max_soc': 100,
+            'min_soc': 20,
+          }),
+        }),
+      }),
+      'last_exception': None,
+      'last_update_success': True,
+      'update_interval': '0:10:00',
+    }),
+    'status': dict({
+      'data': dict({
+        'alias': 'Home hub',
+        'batteries': dict({
+          'bat01': dict({
+            'alias': 'Garage battery',
+            'id': 'bat01',
+            'meter_purpose': None,
+            'meter_type': None,
+            'online': True,
+            'parent_meter': None,
+            'uptime_ms': 43200000,
+            'version': '1.3.0',
+          }),
+          'bat02': dict({
+            'alias': None,
+            'id': 'bat02',
+            'meter_purpose': None,
+            'meter_type': None,
+            'online': True,
+            'parent_meter': None,
+            'uptime_ms': 43100000,
+            'version': '1.3.0',
+          }),
+        }),
+        'hub_id': 'ehxbt',
+        'meters': dict({
+          'ev001': dict({
+            'alias': None,
+            'id': 'ev001',
+            'meter_purpose': 'ev',
+            'meter_type': <MeterType.LOAD: 'LOAD'>,
+            'online': True,
+            'parent_meter': 'grid1',
+            'uptime_ms': 43200000,
+            'version': '1.1.0',
+          }),
+          'grid1': dict({
+            'alias': 'Grid',
+            'id': 'grid1',
+            'meter_purpose': 'primary',
+            'meter_type': <MeterType.PRIMARY: 'PRIMARY'>,
+            'online': True,
+            'parent_meter': None,
+            'uptime_ms': 43200000,
+            'version': '1.1.0',
+          }),
+          'solar1': dict({
+            'alias': 'Solar',
+            'id': 'solar1',
+            'meter_purpose': 'solar',
+            'meter_type': <MeterType.EXT_INVERTER: 'EXT_INVERTER'>,
+            'online': True,
+            'parent_meter': None,
+            'uptime_ms': 43200000,
+            'version': '1.1.0',
+          }),
+        }),
+        'online': True,
+        'uptime_ms': 86400000,
+        'version': '2.4.1',
+      }),
+      'last_exception': None,
+      'last_update_success': True,
+      'update_interval': '0:02:00',
+    }),
+    'telemetry': dict({
+      'data': dict({
+        'batteries': dict({
+          'bat01': dict({
+            'bms': dict({
+              'cell_voltages_v': list([
+                3.842,
+                3.848,
+                3.848,
+                3.848,
+                3.847,
+                3.847,
+                3.848,
+                3.848,
+                3.847,
+                3.848,
+                3.847,
+                3.842,
+              ]),
+              'pack_voltage_v': 46.101,
+              'temperatures_c': list([
+                23.5,
+                23.7,
+              ]),
+            }),
+            'calibrated': True,
+            'capacity_ah': 136.0,
+            'charge_energy_kwh': 922.691,
+            'discharge_energy_kwh': 730.428,
+            'nominal_voltage_v': 44.4,
+            'power_status': 'CHARGING',
+            'power_w': 1500.0,
+            'soc_pct': 75.0,
+          }),
+          'bat02': dict({
+            'bms': None,
+            'calibrated': True,
+            'capacity_ah': 100.0,
+            'charge_energy_kwh': 500.0,
+            'discharge_energy_kwh': 400.0,
+            'nominal_voltage_v': 48.0,
+            'power_status': 'DISCHARGING',
+            'power_w': -500.0,
+            'soc_pct': 50.0,
+          }),
+        }),
+        'batteries_current': True,
+        'meters': dict({
+          'ev001': dict({
+            'current_a': 2.9,
+            'export_energy_kwh': 0.0,
+            'import_energy_kwh': 20.0,
+            'power_factor': 1.0,
+            'power_w': 700.0,
+            'voltage_v': 240.0,
+          }),
+          'grid1': dict({
+            'current_a': 8.3,
+            'export_energy_kwh': 30.0,
+            'import_energy_kwh': 500.0,
+            'power_factor': 0.98,
+            'power_w': 2000.0,
+            'voltage_v': 240.1,
+          }),
+          'solar1': dict({
+            'current_a': 10.4,
+            'export_energy_kwh': 80.0,
+            'import_energy_kwh': 1.0,
+            'power_factor': 0.99,
+            'power_w': -2500.0,
+            'voltage_v': 240.3,
+          }),
+        }),
+        'meters_current': True,
+        'reported': list([
+          'bat01',
+          'bat02',
+          'ev001',
+          'grid1',
+          'solar1',
+        ]),
+      }),
+      'last_exception': None,
+      'last_update_success': True,
+      'update_interval': '0:00:30',
+    }),
+  })
+# ---

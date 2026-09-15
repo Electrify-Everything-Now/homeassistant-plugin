@@ -1,0 +1,8 @@
+{
+  "power": { "value": -500, "unit": "W" },
+  "powerStatus": "DISCHARGING",
+  "soc": { "value": 50, "unit": "%" },
+  "capacity": { "value": 100, "nominalVoltage": 48, "calibrated": true, "calibrating": false, "storage": false },
+  "importEnergy": { "value": 5000000, "unit": "dWh" },
+  "exportEnergy": { "value": 4000000, "unit": "dWh" }
+}

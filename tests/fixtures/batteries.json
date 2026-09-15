@@ -1,0 +1,20 @@
+[
+  {
+    "id": "bat01",
+    "power": { "value": 1500, "unit": "W" },
+    "powerStatus": "CHARGING",
+    "soc": { "value": 75, "unit": "%" },
+    "capacity": { "value": 136, "nominalVoltage": 44.4, "calibrated": true, "calibrating": false, "storage": false },
+    "importEnergy": { "value": 9226910, "unit": "dWh" },
+    "exportEnergy": { "value": 7304280, "unit": "dWh" }
+  },
+  {
+    "id": "bat02",
+    "power": { "value": -500, "unit": "W" },
+    "powerStatus": "DISCHARGING",
+    "soc": { "value": 50, "unit": "%" },
+    "capacity": { "value": 100, "nominalVoltage": 48, "calibrated": true, "calibrating": false, "storage": false },
+    "importEnergy": { "value": 5000000, "unit": "dWh" },
+    "exportEnergy": { "value": 4000000, "unit": "dWh" }
+  }
+]

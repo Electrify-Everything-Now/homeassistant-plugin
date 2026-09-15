@@ -1,2 +1,5 @@
-# Testing requirements for Anode integration
-pytest-homeassistant-custom-component==0.13.106
+# Pins Home Assistant 2025.1.x, the oldest release this integration supports.
+pytest-homeassistant-custom-component==0.13.205
+# HA 2025.1 pins aiodns but not pycares. pycares 4.9+ starts a shutdown thread
+# that this release's test harness reports as a leaked thread.
+pycares==4.4.0

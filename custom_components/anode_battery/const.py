@@ -1,65 +1,44 @@
 """Constants for the Anode integration."""
-from enum import StrEnum
+from __future__ import annotations
+
+from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "anode_battery"
+MANUFACTURER: Final = "Anode"
 
-# API Configuration
-API_BASE_URL: Final = "https://amp.anode.energy"
-API_TIMEOUT: Final = 30
-
-# Configuration Keys
-CONF_API_KEY: Final = "api_key"
 CONF_HUB_ID: Final = "hub_id"
-CONF_EMAIL: Final = "email"
 
-# Options Keys
+# Options
 CONF_STATUS_INTERVAL: Final = "status_update_interval"
 CONF_DEVICE_INTERVAL: Final = "device_update_interval"
 
-# Default Values
-DEFAULT_STATUS_INTERVAL: Final = 120  # 2 minutes
-DEFAULT_DEVICE_INTERVAL: Final = 10   # 10 seconds
-MIN_UPDATE_INTERVAL: Final = 10       # Minimum 10 seconds
+DEFAULT_STATUS_INTERVAL: Final = 120
+DEFAULT_DEVICE_INTERVAL: Final = 30
+MIN_UPDATE_INTERVAL: Final = 10
 
-# Device Classes
-DEVICE_TYPE_HUB: Final = "hub"
-DEVICE_TYPE_BATTERY: Final = "battery"
-DEVICE_TYPE_METER: Final = "meter"
+MODE_POLL_INTERVAL: Final = timedelta(minutes=5)
+SETTINGS_POLL_INTERVAL: Final = timedelta(minutes=10)
+# BMS data needs one request per battery on current firmware, so it is read
+# less often than power and energy. Batteries that report none are re-checked
+# in case their firmware is updated.
+BMS_POLL_INTERVAL: Final = timedelta(minutes=2)
+BMS_UNSUPPORTED_RECHECK: Final = timedelta(hours=1)
+# Wait this long after a schedule boundary or an override command before
+# re-reading the mode, so we see the mode the hub switched to.
+MODE_SETTLE_DELAY: Final = timedelta(seconds=5)
 
+DEFAULT_OVERRIDE_DURATION_MIN: Final = 60
+MAX_OVERRIDE_DURATION_MIN: Final = 7 * 24 * 60
 
-class OperatingMode(StrEnum):
-    """Operating modes for the hub."""
-    CHARGE = "CHARGE"
-    DISCHARGE = "DISCHARGE"
-    IDLE = "IDLE"
-    MATCH = "MATCH"
+# Energy counters can wobble by a few Wh between polls; ignore drops smaller
+# than this rather than logging them.
+ENERGY_DROP_TOLERANCE_KWH: Final = 0.01
 
-
-class MeterType(StrEnum):
-    """Meter types."""
-    PRIMARY = "PRIMARY"
-    LOAD = "LOAD"
-    MONITOR = "MONITOR"
-    EXT_INVERTER = "EXT_INVERTER"
-
-
-# Mode Override Time Options (in seconds)
-OVERRIDE_TIME_OPTIONS: Final = {
-    "15_min": 900,
-    "30_min": 1800,
-    "1_hour": 3600,
-    "2_hours": 7200,
-    "3_hours": 10800,
-    "4_hours": 14400,
-}
-
-# Override Time Labels
-OVERRIDE_TIME_LABELS: Final = {
-    "15_min": "15 minutes",
-    "30_min": "30 minutes",
-    "1_hour": "1 hour",
-    "2_hours": "2 hours",
-    "3_hours": "3 hours",
-    "4_hours": "4 hours",
-}
+# Unique-id suffixes of the selects removed in config entry version 1.2.
+REMOVED_HUB_SELECT_KEYS: Final = (
+    "charge_override",
+    "discharge_override",
+    "idle_override",
+    "match_override",
+)

@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "metadata": [
+    { "friendlyId": "ehxbt", "alias": "Home hub", "meterPurpose": null },
+    { "friendlyId": "bat01", "alias": "Garage battery", "meterPurpose": null },
+    { "friendlyId": "bat02", "alias": null, "meterPurpose": null },
+    { "friendlyId": "grid1", "alias": "Grid", "meterPurpose": "primary" },
+    { "friendlyId": "solar1", "alias": "Solar", "meterPurpose": "solar" },
+    { "friendlyId": "ev001", "alias": null, "meterPurpose": "ev" }
+  ]
+}

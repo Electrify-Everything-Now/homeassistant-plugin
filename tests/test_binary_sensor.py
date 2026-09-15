@@ -1,42 +1,80 @@
-"""Test Anode binary sensors."""
+"""Tests for Anode binary sensors."""
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import time
+from http import HTTPStatus
+
+import pytest
+
+from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.anode_battery.api import OperatingMode, ScheduleSlot
+from custom_components.anode_battery.coordinator import ModeState
+
+from .common import HUB_ID, MODE, STATUS, AnodeCloud, load_fixture, refresh, state
 
 
-async def test_binary_sensors_created(hass: HomeAssistant, init_integration) -> None:
-    """Test that binary sensors are created."""
-    entity_registry = er.async_get(hass)
-
-    # Hub online sensor
-    assert entity_registry.async_get("binary_sensor.anode_hub_test123_online") is not None
-
-    # Hub override sensor
-    assert entity_registry.async_get("binary_sensor.anode_hub_test123_override_active") is not None
-
-    # Battery online sensor
-    assert entity_registry.async_get("binary_sensor.anode_battery_battery1_online") is not None
-
-    # Meter online sensors
-    assert entity_registry.async_get("binary_sensor.anode_meter_meter1_online") is not None
-    assert entity_registry.async_get("binary_sensor.anode_meter_meter2_online") is not None
+async def test_online(hass: HomeAssistant, init_integration: MockConfigEntry) -> None:
+    """Hub and devices read as connected."""
+    assert state(hass, "binary_sensor", f"{HUB_ID}_online").state == STATE_ON
+    assert state(hass, "binary_sensor", "bat01_online").state == STATE_ON
+    assert state(hass, "binary_sensor", "grid1_online").state == STATE_ON
 
 
-async def test_hub_online_sensor(hass: HomeAssistant, init_integration) -> None:
-    """Test hub online sensor."""
-    state = hass.states.get("binary_sensor.anode_hub_test123_online")
-    assert state is not None
-    assert state.state == "on"  # status is True in mock
+async def test_hub_unreachable(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """An unreachable hub reads as disconnected; its devices as unknown."""
+    cloud.respond("GET", STATUS, status=HTTPStatus.REQUEST_TIMEOUT)
+    await refresh(hass, init_integration.runtime_data.status)
+    assert state(hass, "binary_sensor", f"{HUB_ID}_online").state == STATE_OFF
+    assert state(hass, "binary_sensor", "bat01_online").state == STATE_UNAVAILABLE
+
+    cloud.respond("GET", STATUS, json=load_fixture("status.json"))
+    await refresh(hass, init_integration.runtime_data.status)
+    assert state(hass, "binary_sensor", f"{HUB_ID}_online").state == STATE_ON
 
 
-async def test_battery_online_sensor(hass: HomeAssistant, init_integration) -> None:
-    """Test battery online sensor."""
-    state = hass.states.get("binary_sensor.anode_battery_battery1_online")
-    assert state is not None
-    assert state.state == "on"  # Battery in status list
+async def test_device_offline_flag(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """The hub's per-device online flag is honoured."""
+    status = load_fixture("status.json")
+    status["battery"][1]["online"] = False
+    cloud.respond("GET", STATUS, json=status)
+    await refresh(hass, init_integration.runtime_data.status)
+    assert state(hass, "binary_sensor", "bat02_online").state == STATE_OFF
 
 
-async def test_meter_online_sensor(hass: HomeAssistant, init_integration) -> None:
-    """Test meter online sensor."""
-    state = hass.states.get("binary_sensor.anode_meter_meter1_online")
-    assert state is not None
-    assert state.state == "on"  # Meter in status list
+@pytest.mark.usefixtures("frozen_time")
+async def test_override_active(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """Charging at noon, when the schedule has no slot, is an override."""
+    assert state(hass, "binary_sensor", f"{HUB_ID}_override_active").state == STATE_ON
+
+    cloud.respond("GET", MODE, json={"mode": "MATCH"})
+    await refresh(hass, init_integration.runtime_data.mode)
+    assert state(hass, "binary_sensor", f"{HUB_ID}_override_active").state == STATE_OFF
+
+
+def test_override_active_rules() -> None:
+    """Idling inside a slot with a target SOC follows the schedule."""
+    slot = ScheduleSlot(time(1), time(6), OperatingMode.CHARGE, target_soc=80)
+    base = ModeState(
+        mode=OperatingMode.IDLE,
+        schedule=(slot,),
+        scheduled_mode=OperatingMode.CHARGE,
+        active_slot=slot,
+        next_mode=None,
+        next_change=None,
+    )
+    assert base.override_active is False
+    assert replace(base, active_slot=None).override_active is True
+    assert replace(base, mode=OperatingMode.CHARGE).override_active is False
+    assert replace(base, mode=OperatingMode.DISCHARGE).override_active is True
+    assert replace(base, mode=None).override_active is None

@@ -1,117 +1,207 @@
-"""Test the Anode config flow."""
+"""Tests for the Anode config flow."""
+from __future__ import annotations
+
+from collections.abc import Generator
+from http import HTTPStatus
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
-from homeassistant import config_entries
+
+from homeassistant.config_entries import SOURCE_USER
+from homeassistant.const import CONF_API_KEY, CONF_EMAIL
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.anode_battery.const import DOMAIN, CONF_API_KEY, CONF_HUB_ID
-from homeassistant.const import CONF_EMAIL
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.anode_battery.const import (
+    CONF_DEVICE_INTERVAL,
+    CONF_HUB_ID,
+    CONF_STATUS_INTERVAL,
+    DOMAIN,
+)
+
+from .common import (
+    ACCOUNT,
+    API_KEY,
+    DEFAULT_ROUTES,
+    EMAIL,
+    HUB_ID,
+    STATUS,
+    AnodeCloud,
+    load_fixture,
+)
+
+CREDENTIALS = {CONF_EMAIL: f" {EMAIL} ", CONF_API_KEY: API_KEY}
 
 
-async def test_form(hass: HomeAssistant) -> None:
-    """Test we get the form."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"] == {}
-
+@pytest.fixture
+def mock_setup_entry() -> Generator[AsyncMock]:
+    """Stop created entries from being set up."""
     with patch(
-        "custom_components.anode_battery.config_flow.validate_input",
-        return_value={"title": "Anode Hub test123", "hub_version": "1.2.3"},
-    ), patch(
-        "custom_components.anode_battery.async_setup_entry",
-        return_value=True,
-    ) as mock_setup_entry:
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_EMAIL: "test@example.com",
-                CONF_API_KEY: "test_api_key",
-                CONF_HUB_ID: "test123",
-            },
-        )
-        await hass.async_block_till_done()
-
-    assert result2["type"] == FlowResultType.CREATE_ENTRY
-    assert result2["title"] == "Anode Hub test123"
-    assert result2["data"] == {
-        CONF_EMAIL: "test@example.com",
-        CONF_API_KEY: "test_api_key",
-        CONF_HUB_ID: "test123",
-    }
-    assert len(mock_setup_entry.mock_calls) == 1
+        "custom_components.anode_battery.async_setup_entry", return_value=True
+    ) as mock_setup:
+        yield mock_setup
 
 
-async def test_form_invalid_auth(hass: HomeAssistant) -> None:
-    """Test we handle invalid auth."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
+def restore_default(cloud: AnodeCloud, route: str) -> None:
+    fixture = next(name for method, path, name in DEFAULT_ROUTES if (method, path) == ("GET", route))
+    cloud.respond("GET", route, json=load_fixture(fixture))
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_user_flow_finds_account_hub(hass: HomeAssistant, cloud: AnodeCloud) -> None:
+    """Credentials are enough when the account owns a hub."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Home hub"
+    assert result["data"] == {CONF_EMAIL: EMAIL, CONF_API_KEY: API_KEY, CONF_HUB_ID: HUB_ID}
+    assert result["result"].unique_id == HUB_ID
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_user_flow_installer_account_enters_hub(
+    hass: HomeAssistant, cloud: AnodeCloud
+) -> None:
+    """Accounts without a hub are asked for its ID."""
+    cloud.respond("GET", ACCOUNT, status=HTTPStatus.NOT_FOUND, json={"message": "No hub"})
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hub"
+
+    cloud.respond("GET", STATUS, status=HTTPStatus.FORBIDDEN)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_HUB_ID: " EHXBT "}
     )
+    assert result["errors"] == {"base": "hub_not_found"}
 
+    restore_default(cloud, STATUS)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_HUB_ID: " EHXBT "}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == f"Anode Hub {HUB_ID}"
+    assert result["data"][CONF_HUB_ID] == HUB_ID
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+@pytest.mark.parametrize(
+    ("route", "response", "error"),
+    [
+        (ACCOUNT, {"status": HTTPStatus.UNAUTHORIZED}, "invalid_auth"),
+        (ACCOUNT, {"exc": aiohttp.ClientConnectionError()}, "cannot_connect"),
+        (ACCOUNT, {"status": HTTPStatus.BAD_GATEWAY}, "cannot_connect"),
+        (STATUS, {"status": HTTPStatus.REQUEST_TIMEOUT}, "hub_offline"),
+    ],
+)
+async def test_user_flow_errors_recover(
+    hass: HomeAssistant,
+    cloud: AnodeCloud,
+    route: str,
+    response: dict[str, Any],
+    error: str,
+) -> None:
+    """Errors are shown on the form and the flow can still finish."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+
+    cloud.respond("GET", route, **response)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": error}
+
+    restore_default(cloud, route)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_user_flow_unexpected_error(hass: HomeAssistant, cloud: AnodeCloud) -> None:
+    """Unexpected exceptions show a generic error."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     with patch(
-        "custom_components.anode_battery.config_flow.validate_input",
-        side_effect=Exception("invalid_auth"),
+        "custom_components.anode_battery.config_flow.AnodeClient.get_account_hub",
+        side_effect=RuntimeError("boom"),
     ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_EMAIL: "test@example.com",
-                CONF_API_KEY: "bad_key",
-                CONF_HUB_ID: "test123",
-            },
-        )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["errors"] == {"base": "unknown"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    assert result["errors"] == {"base": "unknown"}
 
 
-async def test_form_cannot_connect(hass: HomeAssistant) -> None:
-    """Test we handle cannot connect error."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-
-    with patch(
-        "custom_components.anode_battery.config_flow.validate_input",
-        side_effect=Exception("Connection error"),
-    ):
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_EMAIL: "test@example.com",
-                CONF_API_KEY: "test_api_key",
-                CONF_HUB_ID: "test123",
-            },
-        )
-
-    assert result2["type"] == FlowResultType.FORM
-    assert result2["errors"] == {"base": "unknown"}
-
-
-async def test_options_flow(hass: HomeAssistant, mock_config_entry, mock_anode_api) -> None:
-    """Test options flow."""
+async def test_user_flow_already_configured(
+    hass: HomeAssistant, cloud: AnodeCloud, mock_config_entry: MockConfigEntry
+) -> None:
+    """A hub can only be added once."""
     mock_config_entry.add_to_hass(hass)
-    await hass.config_entries.async_setup(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
 
-    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
 
-    assert result["type"] == FlowResultType.FORM
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_reauth(
+    hass: HomeAssistant, cloud: AnodeCloud, mock_config_entry: MockConfigEntry
+) -> None:
+    """A new API key can be entered after the old one is rejected."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reauth_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+
+    cloud.respond("GET", STATUS, status=HTTPStatus.UNAUTHORIZED)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_EMAIL: EMAIL, CONF_API_KEY: "still-wrong"}
+    )
+    assert result["errors"] == {"base": "invalid_auth"}
+
+    restore_default(cloud, STATUS)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_EMAIL: EMAIL, CONF_API_KEY: "new-key"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.data[CONF_API_KEY] == "new-key"
+    assert mock_config_entry.data[CONF_HUB_ID] == HUB_ID
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_reconfigure(
+    hass: HomeAssistant, cloud: AnodeCloud, mock_config_entry: MockConfigEntry
+) -> None:
+    """Credentials can be changed without removing the integration."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_EMAIL: "new@example.com", CONF_API_KEY: "rotated"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_config_entry.data == {
+        CONF_EMAIL: "new@example.com",
+        CONF_API_KEY: "rotated",
+        CONF_HUB_ID: HUB_ID,
+    }
+
+
+async def test_options_flow(hass: HomeAssistant, init_integration: MockConfigEntry) -> None:
+    """Polling intervals can be changed."""
+    result = await hass.config_entries.options.async_init(init_integration.entry_id)
+    assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
 
-    result2 = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        user_input={
-            "status_update_interval": 60,
-            "device_update_interval": 15,
-        },
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_STATUS_INTERVAL: 60, CONF_DEVICE_INTERVAL: 15}
     )
-
-    assert result2["type"] == FlowResultType.CREATE_ENTRY
-    assert result2["data"] == {
-        "status_update_interval": 60,
-        "device_update_interval": 15,
-    }
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert init_integration.options == {CONF_STATUS_INTERVAL: 60, CONF_DEVICE_INTERVAL: 15}
+    assert init_integration.runtime_data.telemetry.update_interval.total_seconds() == 15

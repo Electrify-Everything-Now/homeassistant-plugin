@@ -1,0 +1,8 @@
+{
+  "status": true,
+  "key": "socConfig",
+  "value": [
+    { "id": "bat01", "status": true, "config": { "minSoc": 10, "maxSoc": 90 } },
+    { "id": "bat02", "status": true, "config": { "minSoc": 20, "maxSoc": 100 } }
+  ]
+}

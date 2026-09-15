@@ -54,9 +54,9 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Next scheduled mode, Next mode change | The next change in the hub's schedule |
 | Online | Off when the hub does not respond |
 | Override active | On when the running mode differs from the schedule (see [limitations](#known-limitations)) |
-| Override mode | Shows the running mode. Choosing a mode overrides the schedule for the **Override duration** |
+| Override mode | Shows the running mode. Choosing a mode overrides the schedule for the **Override duration**. See [Overriding the schedule](#overriding-the-schedule) |
 | Override duration | Minutes an override from **Override mode** lasts. Stored in Home Assistant |
-| Cancel override | Returns the hub to its schedule |
+| Cancel override | Ends an override early and returns the hub to its schedule |
 | Maximum charge power, Maximum discharge power | Fleet power limits in watts. Hubs that store limits as a percent also get **(percent)** versions |
 | Grid import energy, Grid export energy | Lifetime totals across grid meters. Created when a grid meter exists |
 | House power | Grid power minus generation and battery power. Created when a grid meter exists |
@@ -106,6 +106,47 @@ A meter is treated as a grid meter when its type is `PRIMARY` or its purpose in 
 The hub's grid sensors keep working if the grid meter is replaced or a second one is added, so the Energy dashboard does not need changing. The grid meter's own **Import energy** and **Export energy** sensors report the same counters.
 
 The Energy dashboard calculates daily, weekly and monthly totals itself. For a daily total elsewhere, create a **Utility meter** helper on a lifetime energy sensor with a daily reset cycle.
+
+## Overriding the schedule
+
+The hub device has three controls that work together:
+
+| Control | Where | What it does |
+| --- | --- | --- |
+| **Override duration** | Configuration | How long an override lasts, in minutes. Default 60, up to 7 days |
+| **Override mode** | Controls | Choosing a mode runs it for the Override duration, then the hub returns to its schedule |
+| **Cancel override** | Controls | Ends an override early |
+
+To charge for two hours:
+
+1. Set **Override duration** to `120`.
+2. In **Override mode**, choose **Charge**.
+
+The duration is stored in Home Assistant, not on the hub, and is kept across restarts. It is only used when you choose a mode, so set it first.
+
+### What to expect
+
+- **Override mode always shows the mode the hub is running**, including while it follows its schedule. It is not a record of the last mode you chose.
+- **Changing Override duration does not change an override that is already running.** Choose the mode again to restart the override with the new duration.
+- **Choosing the mode that is already shown still starts an override.** For example, choosing **Charge** during a scheduled charge slot keeps charging for the full duration, even past the end of the slot.
+- **Octopus smart charging is paused during an override.** The hub ignores Octopus dispatches while an override from Home Assistant or the Anode app is running.
+- **Home Assistant cannot show when an override will end.** The Anode API does not report it. **Override active** is on while the running mode differs from the schedule, so it stays off for an override that matches the schedule.
+- The `anode_battery.set_override` action takes its own `duration` and ignores Override duration. Use the action in automations.
+
+### Dashboard card
+
+The controls sit in different sections of the device page. To keep them together, add a card like this. Entity IDs start with your hub's name, so adjust them to match:
+
+```yaml
+type: entities
+title: Battery override
+entities:
+  - entity: sensor.home_hub_mode
+  - entity: binary_sensor.home_hub_override_active
+  - entity: number.home_hub_override_duration
+  - entity: select.home_hub_override_mode
+  - entity: button.home_hub_cancel_override
+```
 
 ## Actions
 

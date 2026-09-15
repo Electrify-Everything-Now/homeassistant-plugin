@@ -1,0 +1,8 @@
+{
+  "status": true,
+  "schedule": [
+    { "begin": { "hour": 1, "minute": 0, "second": 0 }, "end": { "hour": 6, "minute": 0, "second": 0 }, "mode": "CHARGE" },
+    { "begin": { "hour": 16, "minute": 0, "second": 0 }, "end": { "hour": 19, "minute": 0, "second": 0 }, "mode": "DISCHARGE" },
+    { "begin": { "hour": 0, "minute": 0, "second": 0 }, "end": { "hour": 0, "minute": 0, "second": 0 }, "mode": "IDLE" }
+  ]
+}

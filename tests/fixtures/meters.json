@@ -1,0 +1,29 @@
+[
+  {
+    "id": "grid1",
+    "power": { "value": 2000, "unit": "W" },
+    "voltage": { "value": 240.1, "unit": "V" },
+    "current": { "value": 8.3, "unit": "A" },
+    "powerFactor": { "value": 0.98, "unit": "PF" },
+    "importEnergy": { "value": 5000000, "unit": "dWh" },
+    "exportEnergy": { "value": 300000, "unit": "dWh" }
+  },
+  {
+    "id": "solar1",
+    "power": { "value": -2500, "unit": "W" },
+    "voltage": { "value": 240.3, "unit": "V" },
+    "current": { "value": 10.4, "unit": "A" },
+    "powerFactor": { "value": 0.99, "unit": "PF" },
+    "importEnergy": { "value": 10000, "unit": "dWh" },
+    "exportEnergy": { "value": 800000, "unit": "dWh" }
+  },
+  {
+    "id": "ev001",
+    "power": { "value": 700, "unit": "W" },
+    "voltage": { "value": 240.0, "unit": "V" },
+    "current": { "value": 2.9, "unit": "A" },
+    "powerFactor": { "value": 1.0, "unit": "PF" },
+    "importEnergy": { "value": 200000, "unit": "dWh" },
+    "exportEnergy": { "value": 0, "unit": "dWh" }
+  }
+]

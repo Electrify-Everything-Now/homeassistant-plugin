@@ -1,125 +1,61 @@
 """Fixtures for Anode integration tests."""
-from collections.abc import Generator
-from unittest.mock import AsyncMock, patch
+from __future__ import annotations
 
+from datetime import UTC, datetime
+
+from freezegun.api import FrozenDateTimeFactory
 import pytest
 
+from homeassistant.const import CONF_API_KEY, CONF_EMAIL
 from homeassistant.core import HomeAssistant
-from homeassistant.setup import async_setup_component
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.anode_battery.const import DOMAIN, CONF_API_KEY, CONF_HUB_ID
-from homeassistant.const import CONF_EMAIL
+from custom_components.anode_battery.const import CONF_HUB_ID, DOMAIN
+
+from .common import API_KEY, EMAIL, HUB_ID, AnodeCloud
 
 
 @pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Enable custom integrations for all tests."""
-    return enable_custom_integrations
+def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
+    """Enable custom integrations in every test."""
 
 
 @pytest.fixture
-def mock_anode_api():
-    """Mock Anode API client."""
-    with patch(
-        "custom_components.anode_battery.AnodeAPIClient",
-        autospec=True,
-    ) as mock_api:
-        api_instance = mock_api.return_value
-        api_instance.hub_id = "test123"
-        api_instance.get_hub_status = AsyncMock(return_value={
-            "status": True,
-            "hub": {
-                "version": "1.2.3",
-                "uptime": 86400000,
-            },
-            "battery": [
-                {
-                    "id": "battery1",
-                    "version": "1.0.0",
-                    "uptime": 43200000,
-                    "type": None,
-                }
-            ],
-            "meter": [
-                {
-                    "id": "meter1",
-                    "version": "1.0.0",
-                    "uptime": 43200000,
-                    "type": "PRIMARY",
-                },
-                {
-                    "id": "meter2",
-                    "version": "1.0.0",
-                    "uptime": 43200000,
-                    "type": "EXT_INVERTER",
-                }
-            ],
-        })
-        api_instance.get_battery_details = AsyncMock(return_value={
-            "power": {"value": 1500.0, "unit": "W"},
-            "powerStatus": "CHARGING",
-            "soc": {"value": 75.0, "unit": "%"},
-            "capacity": {"value": 136, "nominalVoltage": 44.4, "calibrated": True},
-            "importEnergy": {"value": 9226910, "unit": "dWh"},
-            "exportEnergy": {"value": 7304280, "unit": "dWh"},
-        })
-        api_instance.get_meter_details = AsyncMock(return_value={
-            "power": {"value": 2000.0, "unit": "W"},
-            "importEnergy": {"value": 1000000, "unit": "dWh"},
-            "exportEnergy": {"value": 300000, "unit": "dWh"},
-        })
-        api_instance.get_mode = AsyncMock(return_value="CHARGE")
-        api_instance.get_schedule = AsyncMock(return_value={
-            "status": True,
-            "schedule": [
-                {
-                    "begin": {"hour": 1, "minute": 0, "second": 0},
-                    "end": {"hour": 6, "minute": 0, "second": 0},
-                    "mode": "CHARGE",
-                }
-            ],
-        })
-        api_instance.set_override = AsyncMock(return_value={
-            "mode": "CHARGE"
-        })
-        api_instance.get_config = AsyncMock(return_value={"config": []})
-        api_instance.set_config = AsyncMock(return_value={"status": True})
-        api_instance.get_device_metadata = AsyncMock(return_value=[
-            {"friendlyId": "test123", "alias": "My Hub", "meterPurpose": None},
-            {"friendlyId": "battery1", "alias": "My Battery", "meterPurpose": None},
-            {"friendlyId": "meter1", "alias": "Grid", "meterPurpose": "primary"},
-            {"friendlyId": "meter2", "alias": "Solar", "meterPurpose": "solar"},
-        ])
-        yield api_instance
+def cloud(aioclient_mock: AiohttpClientMocker) -> AnodeCloud:
+    """A fake Anode cloud answering with fixture data."""
+    return AnodeCloud(aioclient_mock)
+
+
+@pytest.fixture
+async def frozen_time(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> datetime:
+    """Noon in London on a day with the fixture schedule's slots ahead."""
+    await hass.config.async_set_time_zone("Europe/London")
+    now = datetime(2026, 9, 15, 11, 0, tzinfo=UTC)
+    freezer.move_to(now)
+    return now
 
 
 @pytest.fixture
 def mock_config_entry() -> MockConfigEntry:
-    """Mock a config entry."""
+    """A config entry for the fixture hub."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title="Anode Hub test123",
-        data={
-            CONF_EMAIL: "test@example.com",
-            CONF_API_KEY: "test_api_key",
-            CONF_HUB_ID: "test123",
-        },
-        unique_id="test123",
+        title="Home hub",
+        unique_id=HUB_ID,
+        version=1,
+        minor_version=2,
+        data={CONF_EMAIL: EMAIL, CONF_API_KEY: API_KEY, CONF_HUB_ID: HUB_ID},
     )
 
 
 @pytest.fixture
 async def init_integration(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_anode_api,
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, cloud: AnodeCloud
 ) -> MockConfigEntry:
-    """Set up the Anode integration for testing."""
+    """Set up the integration against the fake cloud."""
     mock_config_entry.add_to_hass(hass)
-
-    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-
     return mock_config_entry

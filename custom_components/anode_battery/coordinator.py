@@ -1,360 +1,441 @@
-"""Data update coordinators for Anode integration."""
+"""Data update coordinators for the Anode integration."""
 from __future__ import annotations
 
-from datetime import timedelta, datetime, time
-import logging
-from typing import Any
-import base64
-
 import asyncio
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
+import logging
+from typing import NoReturn
 
-import aiohttp
-
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_call_later, async_track_point_in_utc_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.const import CONF_EMAIL
 from homeassistant.util import dt as dt_util
 
+from .api import (
+    AnodeAuthError,
+    AnodeClient,
+    AnodeError,
+    AnodeHubOfflineError,
+    BatteryReading,
+    DeviceMetadata,
+    HubStatus,
+    MeterReading,
+    OperatingMode,
+    PowerLimit,
+    PowerLimitKey,
+    ScheduleSlot,
+    SocLimits,
+)
 from .const import (
+    DEFAULT_OVERRIDE_DURATION_MIN,
     DOMAIN,
-    API_BASE_URL,
-    API_TIMEOUT,
-    CONF_API_KEY,
-    CONF_HUB_ID,
-    CONF_STATUS_INTERVAL,
-    CONF_DEVICE_INTERVAL,
-    DEFAULT_STATUS_INTERVAL,
-    DEFAULT_DEVICE_INTERVAL,
+    MODE_POLL_INTERVAL,
+    MODE_SETTLE_DELAY,
+    SETTINGS_POLL_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
+type AnodeConfigEntry = ConfigEntry[AnodeRuntimeData]
 
-class AnodeAPIClient:
-    """API client for Anode."""
 
-    def __init__(self, hass: HomeAssistant, email: str, api_key: str, hub_id: str) -> None:
-        """Initialize the API client."""
-        self.hass = hass
-        self.email = email
-        self.api_key = api_key
+@dataclass
+class AnodeRuntimeData:
+    """Everything a loaded config entry holds."""
+
+    client: AnodeClient
+    hub_id: str
+    status: AnodeStatusCoordinator
+    telemetry: AnodeTelemetryCoordinator
+    mode: AnodeModeCoordinator
+    settings: AnodeSettingsCoordinator
+    # Set by the Override duration number, used by the Override mode select.
+    override_duration_min: int = DEFAULT_OVERRIDE_DURATION_MIN
+
+
+class _AnodeCoordinator[DataT](DataUpdateCoordinator[DataT]):
+    """Shared plumbing for Anode coordinators."""
+
+    config_entry: AnodeConfigEntry
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: AnodeConfigEntry,
+        client: AnodeClient,
+        hub_id: str,
+        *,
+        name: str,
+        update_interval: timedelta,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=entry,
+            name=f"{DOMAIN} {hub_id} {name}",
+            update_interval=update_interval,
+        )
+        self.client = client
         self.hub_id = hub_id
-        self.session = async_get_clientsession(hass)
 
-        # Create Basic Auth header
-        credentials = f"{email}:{api_key}"
-        b64_credentials = base64.b64encode(credentials.encode()).decode()
-        self.headers = {
-            "Authorization": f"Basic {b64_credentials}",
-        }
-
-    async def _request(self, endpoint: str) -> dict[str, Any]:
-        """Make API request."""
-        url = f"{API_BASE_URL}{endpoint}"
-
-        try:
-            async with asyncio.timeout(API_TIMEOUT):
-                async with self.session.get(url, headers=self.headers) as response:
-                    if response.status == 401:
-                        raise UpdateFailed("Authentication failed")
-                    if response.status == 408:
-                        raise UpdateFailed("Device timeout - may be offline")
-                    if response.status != 200:
-                        raise UpdateFailed(f"HTTP {response.status}")
-
-                    return await response.json()
-        except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Connection error: {err}") from err
-        except TimeoutError as err:
-            raise UpdateFailed("Request timeout") from err
-
-    async def get_hub_status(self) -> dict[str, Any]:
-        """Get hub status including connected devices."""
-        return await self._request(f"/api/device/status/{self.hub_id}")
-
-    async def get_battery_details(self, battery_id: str | None = None) -> dict[str, Any]:
-        """Get battery details."""
-        endpoint = f"/api/device/battery/{self.hub_id}"
-        if battery_id:
-            endpoint += f"?id={battery_id}"
-        return await self._request(endpoint)
-
-    async def get_meter_details(self, meter_id: str | None = None) -> dict[str, Any]:
-        """Get meter details."""
-        endpoint = f"/api/device/meter/{self.hub_id}"
-        if meter_id:
-            endpoint += f"?id={meter_id}"
-        return await self._request(endpoint)
-
-    async def get_mode(self) -> str:
-        """Get current operating mode."""
-        data = await self._request(f"/api/device/{self.hub_id}/mode")
-        return data.get("mode", "UNKNOWN")
-
-    async def get_schedule(self) -> dict[str, Any]:
-        """Get schedule."""
-        return await self._request(f"/api/device/schedule/{self.hub_id}")
-
-    async def set_override(self, mode: str, timeout: int) -> dict[str, Any]:
-        """Set mode override."""
-        url = f"{API_BASE_URL}/api/device/{self.hub_id}/override?mode={mode}&timeout={timeout}"
-
-        try:
-            async with asyncio.timeout(API_TIMEOUT):
-                async with self.session.put(url, headers=self.headers) as response:
-                    if response.status != 200:
-                        raise UpdateFailed(f"Override failed: HTTP {response.status}")
-                    return await response.json()
-        except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Override error: {err}") from err
-
-    async def get_config(self, key: str) -> dict[str, Any]:
-        """Get configuration value."""
-        return await self._request(f"/api/device/config/{self.hub_id}/{key}")
-
-    async def set_config(self, config: dict[str, Any]) -> dict[str, Any]:
-        """Set configuration values."""
-        url = f"{API_BASE_URL}/api/device/config/{self.hub_id}"
-
-        try:
-            async with asyncio.timeout(API_TIMEOUT):
-                async with self.session.put(url, headers=self.headers, json=config) as response:
-                    if response.status != 200:
-                        raise UpdateFailed(f"Config failed: HTTP {response.status}")
-                    return await response.json()
-        except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Config error: {err}") from err
-
-    async def get_device_metadata(self) -> list[dict[str, Any]]:
-        """Return per-device metadata (alias, meterPurpose) for the hub.
-
-        Calls the installer-gui user endpoint, which returns:
-        ``{"success": true, "metadata": [{"friendlyId", "alias", "meterPurpose"}]}``.
-        """
-        data = await self._request(f"/api/user/device-metadata/{self.hub_id}")
-        return data.get("metadata", []) or []
+    def _raise_update_error(self, what: str, err: BaseException) -> NoReturn:
+        """Raise what the coordinator should raise for a failed read."""
+        if isinstance(err, AnodeAuthError):
+            raise ConfigEntryAuthFailed(
+                f"Anode rejected the credentials while reading {what}",
+                translation_domain=DOMAIN,
+                translation_key="auth_failed",
+            ) from err
+        if isinstance(err, AnodeHubOfflineError):
+            raise UpdateFailed(
+                f"Hub {self.hub_id} did not respond",
+                translation_domain=DOMAIN,
+                translation_key="hub_offline",
+                translation_placeholders={"hub_id": self.hub_id},
+            ) from err
+        if isinstance(err, AnodeError):
+            raise UpdateFailed(
+                f"Could not read {what}: {err}",
+                translation_domain=DOMAIN,
+                translation_key="update_failed",
+                translation_placeholders={"what": what, "error": str(err)},
+            ) from err
+        raise err
 
 
-class AnodeStatusCoordinator(DataUpdateCoordinator):
-    """Coordinator for hub status and device discovery."""
+class AnodeStatusCoordinator(_AnodeCoordinator[HubStatus]):
+    """Hub status: which batteries and meters exist, firmware, aliases."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        api_client: AnodeAPIClient,
-        update_interval: int,
+        entry: AnodeConfigEntry,
+        client: AnodeClient,
+        hub_id: str,
+        update_interval: timedelta,
     ) -> None:
-        """Initialize the coordinator."""
-        self.api_client = api_client
-
         super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_status",
-            update_interval=timedelta(seconds=update_interval),
+            hass, entry, client, hub_id, name="status", update_interval=update_interval
         )
+        self._metadata: dict[str, DeviceMetadata] = {}
 
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch hub status data and merge in per-device metadata."""
-        try:
-            status = await self.api_client.get_hub_status()
-        except UpdateFailed:
-            raise
-        except Exception as err:
-            raise UpdateFailed(f"Error fetching hub status: {err}") from err
-
-        # Fail-soft metadata fetch: older hubs / backends may not expose this
-        # endpoint. If it errors, proceed with meterPurpose = None so the rest
-        # of the integration keeps working.
-        purpose_by_id: dict[str, str | None] = {}
-        alias_by_id: dict[str, str | None] = {}
-        try:
-            metadata = await self.api_client.get_device_metadata()
-            for item in metadata:
-                fid = item.get("friendlyId")
-                if not fid:
-                    continue
-                purpose_by_id[fid] = item.get("meterPurpose")
-                alias_by_id[fid] = item.get("alias")
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Device metadata unavailable: %s", err)
-
-        for meter in status.get("meter", []) or []:
-            mid = meter.get("id")
-            meter["meterPurpose"] = purpose_by_id.get(mid)
-            if alias_by_id.get(mid) is not None:
-                meter["alias"] = alias_by_id.get(mid)
-
-        for battery in status.get("battery", []) or []:
-            bid = battery.get("id")
-            if alias_by_id.get(bid) is not None:
-                battery["alias"] = alias_by_id.get(bid)
-
-        hub_alias = alias_by_id.get(self.api_client.hub_id)
-        if hub_alias is not None:
-            status.setdefault("hub", {})["alias"] = hub_alias
-
-        return status
-
-
-class AnodeDeviceCoordinator(DataUpdateCoordinator):
-    """Coordinator for individual device data (batteries and meters)."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        api_client: AnodeAPIClient,
-        update_interval: int,
-    ) -> None:
-        """Initialize the coordinator."""
-        self.api_client = api_client
-        self._battery_ids: list[str] = []
-        self._meter_ids: list[str] = []
-
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_devices",
-            update_interval=timedelta(seconds=update_interval),
+    async def _async_update_data(self) -> HubStatus:
+        status, metadata = await asyncio.gather(
+            self.client.get_hub_status(self.hub_id),
+            self.client.get_device_metadata(self.hub_id),
+            return_exceptions=True,
         )
-
-    def set_device_ids(self, battery_ids: list[str], meter_ids: list[str]) -> None:
-        """Update the list of devices to poll."""
-        self._battery_ids = battery_ids
-        self._meter_ids = meter_ids
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch device data for all batteries and meters."""
-        data: dict[str, Any] = {
-            "batteries": {},
-            "meters": {},
-        }
-
-        # Fetch battery data
-        for battery_id in self._battery_ids:
-            try:
-                battery_data = await self.api_client.get_battery_details(battery_id)
-                data["batteries"][battery_id] = battery_data
-            except UpdateFailed as err:
-                _LOGGER.warning("Failed to update battery %s: %s", battery_id, err)
-
-        # Fetch meter data
-        for meter_id in self._meter_ids:
-            try:
-                meter_data = await self.api_client.get_meter_details(meter_id)
-                data["meters"][meter_id] = meter_data
-            except UpdateFailed as err:
-                _LOGGER.warning("Failed to update meter %s: %s", meter_id, err)
-
-        return data
-
-
-class AnodeModeCoordinator(DataUpdateCoordinator):
-    """Coordinator for mode and schedule data with smart refresh."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        api_client: AnodeAPIClient,
-    ) -> None:
-        """Initialize the coordinator."""
-        self.api_client = api_client
-        self._next_schedule_time: datetime | None = None
-
-        # Start with a reasonable interval, will be adjusted based on schedule
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_mode",
-            update_interval=timedelta(seconds=60),
-        )
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch mode and schedule data."""
-        mode = await self.api_client.get_mode()
-        schedule_data = await self.api_client.get_schedule()
-
-        # Calculate next schedule transition
-        next_mode, next_time = self._calculate_next_schedule(schedule_data.get("schedule", []))
-        self._next_schedule_time = next_time
-
-        # Adjust update interval based on next schedule time
-        self._adjust_update_interval(next_time)
-
-        return {
-            "mode": mode,
-            "schedule": schedule_data.get("schedule", []),
-            "next_mode": next_mode,
-            "next_time": next_time,
-        }
-
-    def _calculate_next_schedule(
-        self, schedule: list[dict[str, Any]]
-    ) -> tuple[str | None, datetime | None]:
-        """Calculate the next scheduled mode transition."""
-        if not schedule:
-            return None, None
-
-        now = dt_util.now()
-        current_time = now.time()
-        today_date = now.date()
-
-        # Convert schedule slots to datetime objects for today
-        transitions: list[tuple[datetime, str]] = []
-
-        for slot in schedule:
-            begin = slot.get("begin", {})
-            mode = slot.get("mode", "UNKNOWN")
-
-            begin_time = time(
-                hour=begin.get("hour", 0),
-                minute=begin.get("minute", 0),
-                second=begin.get("second", 0),
-            )
-            # Create timezone-aware datetime
-            begin_datetime = dt_util.as_local(datetime.combine(today_date, begin_time))
-
-            # If time has passed today, schedule for tomorrow
-            if begin_datetime <= now:
-                begin_datetime = dt_util.as_local(
-                    datetime.combine(today_date + timedelta(days=1), begin_time)
-                )
-
-            transitions.append((begin_datetime, mode))
-
-        # Sort by time and get the earliest
-        if transitions:
-            transitions.sort(key=lambda x: x[0])
-            next_time, next_mode = transitions[0]
-            return next_mode, next_time
-
-        return None, None
-
-    def _adjust_update_interval(self, next_time: datetime | None) -> None:
-        """Adjust update interval based on next schedule time."""
-        if next_time is None:
-            # No schedule, use default 5 minute interval
-            self.update_interval = timedelta(minutes=5)
-            return
-
-        now = dt_util.now()
-        time_until_transition = (next_time - now).total_seconds()
-
-        if time_until_transition < 60:
-            # Less than 1 minute away, update every 10 seconds
-            self.update_interval = timedelta(seconds=10)
-        elif time_until_transition < 300:
-            # Less than 5 minutes away, update every 30 seconds
-            self.update_interval = timedelta(seconds=30)
-        elif time_until_transition < 1800:
-            # Less than 30 minutes away, update every minute
-            self.update_interval = timedelta(minutes=1)
+        if isinstance(status, BaseException):
+            self._raise_update_error("hub status", status)
+        if isinstance(metadata, AnodeError):
+            # Installer accounts and older backends cannot read metadata.
+            # Keep the last aliases rather than dropping them.
+            _LOGGER.debug("Device metadata unavailable for %s: %s", self.hub_id, metadata)
+        elif isinstance(metadata, BaseException):
+            raise metadata
         else:
-            # More than 30 minutes away, update every 5 minutes
-            self.update_interval = timedelta(minutes=5)
+            self._metadata = metadata
+        return status.with_metadata(self._metadata)
 
-    async def async_request_refresh_soon(self) -> None:
-        """Request a refresh soon (used after override changes)."""
-        # Force immediate refresh
-        await self.async_request_refresh()
+
+@dataclass(frozen=True, slots=True)
+class Telemetry:
+    """Latest battery and meter readings.
+
+    Readings are kept per device after it stops reporting, so energy
+    calculations never substitute zero for a device that dropped out. Use
+    ``is_current`` to decide whether a device's reading is live.
+    """
+
+    batteries: dict[str, BatteryReading]
+    meters: dict[str, MeterReading]
+    reported: frozenset[str]
+    batteries_current: bool
+    meters_current: bool
+
+    def is_current(self, device_id: str) -> bool:
+        """Whether the device reported in the latest successful read."""
+        return device_id in self.reported
+
+
+class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
+    """Power, state of charge and energy counters for every device."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: AnodeConfigEntry,
+        client: AnodeClient,
+        hub_id: str,
+        update_interval: timedelta,
+    ) -> None:
+        super().__init__(
+            hass, entry, client, hub_id, name="telemetry", update_interval=update_interval
+        )
+        self._failing: set[str] = set()
+
+    async def _async_update_data(self) -> Telemetry:
+        batteries, meters = await asyncio.gather(
+            self.client.get_batteries(self.hub_id),
+            self.client.get_meters(self.hub_id),
+            return_exceptions=True,
+        )
+        for result in (batteries, meters):
+            if isinstance(result, AnodeAuthError) or (
+                isinstance(result, BaseException) and not isinstance(result, AnodeError)
+            ):
+                self._raise_update_error("telemetry", result)
+        if isinstance(batteries, AnodeError) and isinstance(meters, AnodeError):
+            self._raise_update_error("telemetry", batteries)
+
+        previous = self.data
+        reported: set[str] = set()
+
+        battery_map = dict(previous.batteries) if previous else {}
+        if isinstance(batteries, AnodeError):
+            self._note_failure("battery", batteries)
+        else:
+            self._note_success("battery")
+            battery_map.update(batteries)
+            reported.update(batteries)
+
+        meter_map = dict(previous.meters) if previous else {}
+        if isinstance(meters, AnodeError):
+            self._note_failure("meter", meters)
+        else:
+            self._note_success("meter")
+            meter_map.update(meters)
+            reported.update(meters)
+
+        return Telemetry(
+            batteries=battery_map,
+            meters=meter_map,
+            reported=frozenset(reported),
+            batteries_current=not isinstance(batteries, AnodeError),
+            meters_current=not isinstance(meters, AnodeError),
+        )
+
+    def _note_failure(self, kind: str, err: AnodeError) -> None:
+        if kind not in self._failing:
+            self._failing.add(kind)
+            _LOGGER.warning("Could not read %s readings from hub %s: %s", kind, self.hub_id, err)
+
+    def _note_success(self, kind: str) -> None:
+        if kind in self._failing:
+            self._failing.discard(kind)
+            _LOGGER.info("Reading %s data from hub %s again", kind, self.hub_id)
+
+
+def scheduled_mode_at(
+    schedule: tuple[ScheduleSlot, ...] | list[ScheduleSlot], moment: datetime
+) -> tuple[OperatingMode, ScheduleSlot | None]:
+    """Return the mode the schedule asks for at a moment, and the slot."""
+    local = moment.astimezone(dt_util.get_default_time_zone()).time()
+    for slot in schedule:
+        if slot.contains(local):
+            return slot.mode, slot
+    return OperatingMode.MATCH, None
+
+
+def next_schedule_change(
+    schedule: tuple[ScheduleSlot, ...] | list[ScheduleSlot], now: datetime
+) -> tuple[datetime, OperatingMode] | None:
+    """Return when the scheduled mode next changes, and the mode it changes to.
+
+    Schedule times are in the hub's local time, which is assumed to match
+    Home Assistant's time zone.
+    """
+    if not schedule:
+        return None
+    tz = dt_util.get_default_time_zone()
+    local_now = now.astimezone(tz)
+    current, _ = scheduled_mode_at(schedule, local_now)
+    boundaries = sorted({t for slot in schedule for t in (slot.begin, slot.end)})
+    candidates = sorted(
+        moment
+        for day in (local_now.date(), local_now.date() + timedelta(days=1))
+        for t in boundaries
+        if (moment := datetime.combine(day, t, tzinfo=tz)) > local_now
+    )
+    for moment in candidates:
+        mode, _ = scheduled_mode_at(schedule, moment)
+        if mode is not current:
+            return moment, mode
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class ModeState:
+    """What the hub is doing and what its schedule asks for."""
+
+    mode: OperatingMode | None
+    schedule: tuple[ScheduleSlot, ...]
+    scheduled_mode: OperatingMode
+    active_slot: ScheduleSlot | None
+    next_mode: OperatingMode | None
+    next_change: datetime | None
+
+    @property
+    def override_active(self) -> bool | None:
+        """Whether the hub is running a different mode from its schedule.
+
+        The API does not report overrides directly, so this compares the
+        running mode with the schedule. Octopus smart-charging dispatches also
+        show as an override.
+        """
+        if self.mode is None:
+            return None
+        if self.mode is self.scheduled_mode:
+            return False
+        # A slot with a target state of charge settles into IDLE once reached.
+        if (
+            self.mode is OperatingMode.IDLE
+            and self.active_slot is not None
+            and self.active_slot.target_soc
+        ):
+            return False
+        return True
+
+
+class AnodeModeCoordinator(_AnodeCoordinator[ModeState]):
+    """Running mode and schedule.
+
+    Polls slowly, and additionally refreshes just after each scheduled mode
+    change so mode entities flip at the right time.
+    """
+
+    def __init__(
+        self, hass: HomeAssistant, entry: AnodeConfigEntry, client: AnodeClient, hub_id: str
+    ) -> None:
+        super().__init__(
+            hass, entry, client, hub_id, name="mode", update_interval=MODE_POLL_INTERVAL
+        )
+        self._unsub_transition: CALLBACK_TYPE | None = None
+        self._unsub_confirm: CALLBACK_TYPE | None = None
+
+    async def _async_update_data(self) -> ModeState:
+        mode, schedule = await asyncio.gather(
+            self.client.get_mode(self.hub_id),
+            self.client.get_schedule(self.hub_id),
+            return_exceptions=True,
+        )
+        if isinstance(mode, BaseException):
+            self._raise_update_error("mode", mode)
+        if isinstance(schedule, BaseException):
+            self._raise_update_error("schedule", schedule)
+
+        now = dt_util.utcnow()
+        scheduled, slot = scheduled_mode_at(schedule, now)
+        change = next_schedule_change(schedule, now)
+        self._track_transition(change[0] if change else None)
+        return ModeState(
+            mode=mode,
+            schedule=tuple(schedule),
+            scheduled_mode=scheduled,
+            active_slot=slot,
+            next_mode=change[1] if change else None,
+            next_change=change[0] if change else None,
+        )
+
+    @callback
+    def _track_transition(self, when: datetime | None) -> None:
+        if self._unsub_transition:
+            self._unsub_transition()
+            self._unsub_transition = None
+        if when is not None:
+            self._unsub_transition = async_track_point_in_utc_time(
+                self.hass, self._async_handle_transition, when + MODE_SETTLE_DELAY
+            )
+
+    async def _async_handle_transition(self, _now: datetime) -> None:
+        self._unsub_transition = None
+        await self.async_refresh()
+
+    @callback
+    def async_note_override(self, mode: OperatingMode | None) -> None:
+        """Show an override sent from Home Assistant now, then confirm it.
+
+        ``None`` means the override was cancelled.
+        """
+        if self.data is not None:
+            running = self.data.scheduled_mode if mode is None else mode
+            self.async_set_updated_data(replace(self.data, mode=running))
+        if self._unsub_confirm:
+            self._unsub_confirm()
+        self._unsub_confirm = async_call_later(
+            self.hass, MODE_SETTLE_DELAY, self._async_confirm_override
+        )
+
+    async def _async_confirm_override(self, _now: datetime) -> None:
+        self._unsub_confirm = None
+        await self.async_refresh()
+
+    async def async_shutdown(self) -> None:
+        """Cancel scheduled refreshes."""
+        for unsub in (self._unsub_transition, self._unsub_confirm):
+            if unsub:
+                unsub()
+        self._unsub_transition = self._unsub_confirm = None
+        await super().async_shutdown()
+
+
+@dataclass(frozen=True, slots=True)
+class HubSettings:
+    """Configurable hub limits."""
+
+    soc_limits: dict[str, SocLimits]
+    power_limits: dict[PowerLimitKey, PowerLimit]
+
+
+class AnodeSettingsCoordinator(_AnodeCoordinator[HubSettings]):
+    """State-of-charge windows and power limits."""
+
+    def __init__(
+        self, hass: HomeAssistant, entry: AnodeConfigEntry, client: AnodeClient, hub_id: str
+    ) -> None:
+        super().__init__(
+            hass,
+            entry,
+            client,
+            hub_id,
+            name="settings",
+            update_interval=SETTINGS_POLL_INTERVAL,
+        )
+
+    async def _async_update_data(self) -> HubSettings:
+        soc, charge, discharge = await asyncio.gather(
+            self.client.get_soc_limits(self.hub_id),
+            self.client.get_power_limit(self.hub_id, PowerLimitKey.MAX_CHARGE),
+            self.client.get_power_limit(self.hub_id, PowerLimitKey.MAX_DISCHARGE),
+            return_exceptions=True,
+        )
+        results = (soc, charge, discharge)
+        for result in results:
+            if isinstance(result, AnodeAuthError) or (
+                isinstance(result, BaseException) and not isinstance(result, AnodeError)
+            ):
+                self._raise_update_error("settings", result)
+        if all(isinstance(result, AnodeError) for result in results):
+            self._raise_update_error("settings", soc)
+
+        previous = self.data
+        if isinstance(soc, AnodeError):
+            _LOGGER.debug("Could not read SOC limits for %s: %s", self.hub_id, soc)
+            soc_limits = previous.soc_limits if previous else {}
+        else:
+            soc_limits = soc
+
+        power_limits = dict(previous.power_limits) if previous else {}
+        for key, result in (
+            (PowerLimitKey.MAX_CHARGE, charge),
+            (PowerLimitKey.MAX_DISCHARGE, discharge),
+        ):
+            if isinstance(result, AnodeError):
+                _LOGGER.debug("Could not read %s for %s: %s", key, self.hub_id, result)
+            else:
+                power_limits[key] = result
+
+        return HubSettings(soc_limits=soc_limits, power_limits=power_limits)

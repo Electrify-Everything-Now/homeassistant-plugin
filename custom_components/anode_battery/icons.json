@@ -1,0 +1,139 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "override_active": {
+        "default": "mdi:calendar-remove",
+        "state": {
+          "off": "mdi:calendar-check"
+        }
+      }
+    },
+    "button": {
+      "cancel_override": {
+        "default": "mdi:calendar-refresh"
+      }
+    },
+    "number": {
+      "min_soc": {
+        "default": "mdi:battery-low"
+      },
+      "max_soc": {
+        "default": "mdi:battery-high"
+      },
+      "max_charge_power": {
+        "default": "mdi:battery-charging"
+      },
+      "max_discharge_power": {
+        "default": "mdi:battery-minus"
+      },
+      "max_charge_power_percent": {
+        "default": "mdi:battery-charging"
+      },
+      "max_discharge_power_percent": {
+        "default": "mdi:battery-minus"
+      },
+      "override_duration": {
+        "default": "mdi:timer-outline"
+      }
+    },
+    "select": {
+      "override_mode": {
+        "default": "mdi:battery-sync",
+        "state": {
+          "charge": "mdi:battery-charging",
+          "discharge": "mdi:battery-minus",
+          "idle": "mdi:battery-off",
+          "match": "mdi:battery-sync"
+        }
+      }
+    },
+    "sensor": {
+      "mode": {
+        "default": "mdi:flash"
+      },
+      "next_mode": {
+        "default": "mdi:clock-outline"
+      },
+      "firmware_version": {
+        "default": "mdi:information-outline"
+      },
+      "house_power": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "house_energy": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "grid_import_energy": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "grid_export_energy": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "total_battery_charge_energy": {
+        "default": "mdi:battery-charging"
+      },
+      "total_battery_discharge_energy": {
+        "default": "mdi:battery-minus"
+      },
+      "total_battery_energy_capacity": {
+        "default": "mdi:battery-heart-variant"
+      },
+      "total_battery_energy_remaining": {
+        "default": "mdi:battery-clock"
+      },
+      "battery_charge_power": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_discharge_power": {
+        "default": "mdi:battery-minus"
+      },
+      "capacity": {
+        "default": "mdi:battery-heart-variant"
+      },
+      "capacity_remaining": {
+        "default": "mdi:battery-clock"
+      },
+      "energy_capacity": {
+        "default": "mdi:battery-heart-variant"
+      },
+      "energy_remaining": {
+        "default": "mdi:battery-clock"
+      },
+      "power_status": {
+        "default": "mdi:battery-sync"
+      },
+      "battery_charge_energy": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_discharge_energy": {
+        "default": "mdi:battery-minus"
+      },
+      "import_power": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "export_power": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "import_energy": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "export_energy": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "meter_type": {
+        "default": "mdi:label-outline"
+      },
+      "parent_meter": {
+        "default": "mdi:link"
+      }
+    }
+  },
+  "services": {
+    "set_override": {
+      "service": "mdi:calendar-edit"
+    },
+    "cancel_override": {
+      "service": "mdi:calendar-refresh"
+    }
+  }
+}

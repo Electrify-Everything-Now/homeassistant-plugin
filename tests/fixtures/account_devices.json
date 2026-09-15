@@ -1,0 +1,13 @@
+{
+  "hub": { "id": "ehxbt", "deviceType": "hub", "alias": "Home hub", "meterPurpose": null },
+  "meters": [
+    { "id": "grid1", "deviceType": "meter", "alias": "Grid", "meterPurpose": "primary" },
+    { "id": "solar1", "deviceType": "meter", "alias": "Solar", "meterPurpose": "solar" },
+    { "id": "ev001", "deviceType": "meter", "meterPurpose": "ev" }
+  ],
+  "batteries": [
+    { "id": "bat01", "deviceType": "battery", "alias": "Garage battery" },
+    { "id": "bat02", "deviceType": "battery" }
+  ],
+  "repeaters": []
+}

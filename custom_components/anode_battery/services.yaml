@@ -1,29 +1,26 @@
 set_override:
-  name: Set Override
-  description: Override the hub operating mode for a specified duration.
   fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: anode_battery
     hub_id:
-      name: Hub ID
-      description: The friendly ID of the hub to override.
-      required: true
-      example: "abc123"
+      required: false
+      example: "ehxbt"
       selector:
         text:
     mode:
-      name: Mode
-      description: Operating mode to override to.
       required: true
       example: "CHARGE"
       selector:
         select:
           options:
-            - CHARGE
-            - DISCHARGE
-            - IDLE
-            - MATCH
+            - "CHARGE"
+            - "DISCHARGE"
+            - "IDLE"
+            - "MATCH"
     duration:
-      name: Duration
-      description: Duration of the override in seconds. Use 0 to cancel an active override. Any positive value is allowed.
       required: true
       example: 3600
       selector:
@@ -32,4 +29,17 @@ set_override:
           max: 604800
           step: 1
           mode: box
-          unit_of_measurement: seconds
+          unit_of_measurement: s
+
+cancel_override:
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: anode_battery
+    hub_id:
+      required: false
+      example: "ehxbt"
+      selector:
+        text:

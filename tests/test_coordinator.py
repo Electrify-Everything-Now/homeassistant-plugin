@@ -1,78 +1,117 @@
-"""Test Anode coordinators."""
-from unittest.mock import AsyncMock
+"""Tests for Anode coordinators and schedule calculations."""
+from __future__ import annotations
+
+from datetime import UTC, datetime, time
+from http import HTTPStatus
+from zoneinfo import ZoneInfo
 
 import pytest
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from homeassistant.config_entries import SOURCE_REAUTH
+from homeassistant.core import HomeAssistant
+
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.anode_battery.api import OperatingMode, PowerLimitKey, ScheduleSlot
 from custom_components.anode_battery.coordinator import (
-    AnodeStatusCoordinator,
-    AnodeDeviceCoordinator,
-    AnodeModeCoordinator,
+    next_schedule_change,
+    scheduled_mode_at,
+)
+
+from .common import (
+    MAX_CHARGE,
+    METADATA,
+    SOC_CONFIG,
+    STATUS,
+    AnodeCloud,
+    load_fixture,
+    refresh,
+)
+
+LONDON = ZoneInfo("Europe/London")
+SCHEDULE = (
+    ScheduleSlot(time(23), time(2), OperatingMode.CHARGE),
+    ScheduleSlot(time(2), time(5), OperatingMode.CHARGE),
+    ScheduleSlot(time(17), time(19), OperatingMode.DISCHARGE),
 )
 
 
-async def test_status_coordinator_success(hass: HomeAssistant, mock_anode_api) -> None:
-    """Test status coordinator successfully fetches data."""
-    coordinator = AnodeStatusCoordinator(hass, mock_anode_api, 120)
-
-    await coordinator.async_config_entry_first_refresh()
-
-    assert coordinator.data is not None
-    assert coordinator.data["status"] is True
-    assert "hub" in coordinator.data
-    assert "battery" in coordinator.data
-    assert "meter" in coordinator.data
-    mock_anode_api.get_hub_status.assert_called_once()
+@pytest.fixture(autouse=True)
+async def london(hass: HomeAssistant) -> None:
+    """Run schedule maths in a time zone with daylight saving."""
+    await hass.config.async_set_time_zone("Europe/London")
 
 
-async def test_device_coordinator_success(hass: HomeAssistant, mock_anode_api) -> None:
-    """Test device coordinator successfully fetches data."""
-    coordinator = AnodeDeviceCoordinator(hass, mock_anode_api, 10)
-    coordinator.set_device_ids(["battery1"], ["meter1"])
-
-    await coordinator.async_config_entry_first_refresh()
-
-    assert coordinator.data is not None
-    assert "batteries" in coordinator.data
-    assert "meters" in coordinator.data
-    assert "battery1" in coordinator.data["batteries"]
-    assert "meter1" in coordinator.data["meters"]
-    assert mock_anode_api.get_battery_details.call_count == 1
-    assert mock_anode_api.get_meter_details.call_count == 1
+def local(hour: int, minute: int = 0, day: int = 15) -> datetime:
+    return datetime(2026, 9, day, hour, minute, tzinfo=LONDON)
 
 
-async def test_mode_coordinator_success(hass: HomeAssistant, mock_anode_api) -> None:
-    """Test mode coordinator successfully fetches data."""
-    coordinator = AnodeModeCoordinator(hass, mock_anode_api)
-
-    await coordinator.async_config_entry_first_refresh()
-
-    assert coordinator.data is not None
-    assert coordinator.data["mode"] == "CHARGE"
-    assert "schedule" in coordinator.data
-    assert "next_mode" in coordinator.data
-    assert "next_time" in coordinator.data
-    mock_anode_api.get_mode.assert_called_once()
-    mock_anode_api.get_schedule.assert_called_once()
-
-
-async def test_coordinator_handles_api_error(hass: HomeAssistant, mock_anode_api) -> None:
-    """Test coordinator handles API errors."""
-    mock_anode_api.get_hub_status.side_effect = Exception("API Error")
-
-    coordinator = AnodeStatusCoordinator(hass, mock_anode_api, 120)
-
-    with pytest.raises(ConfigEntryNotReady):
-        await coordinator.async_config_entry_first_refresh()
+@pytest.mark.parametrize(
+    ("moment", "expected"),
+    [
+        (local(23, 30), OperatingMode.CHARGE),
+        (local(1), OperatingMode.CHARGE),
+        (local(5), OperatingMode.MATCH),
+        (local(18), OperatingMode.DISCHARGE),
+    ],
+)
+def test_scheduled_mode_at(moment: datetime, expected: OperatingMode) -> None:
+    """The scheduled mode follows slot boundaries, including overnight."""
+    assert scheduled_mode_at(SCHEDULE, moment)[0] is expected
 
 
-async def test_mode_coordinator_calculates_next_schedule(hass: HomeAssistant, mock_anode_api) -> None:
-    """Test mode coordinator calculates next schedule time."""
-    coordinator = AnodeModeCoordinator(hass, mock_anode_api)
+def test_next_change_skips_boundaries_that_keep_the_mode() -> None:
+    """Back-to-back slots with the same mode are one continuous charge."""
+    change = next_schedule_change(SCHEDULE, local(23, 30).astimezone(UTC))
+    assert change == (local(5, day=16), OperatingMode.MATCH)
 
-    await coordinator.async_config_entry_first_refresh()
 
-    # Should have calculated next mode and time
-    assert coordinator.data.get("next_mode") is not None or coordinator.data.get("next_time") is not None
+def test_next_change_wraps_to_tomorrow() -> None:
+    """After the last change of the day, the next is tomorrow's first."""
+    assert next_schedule_change(SCHEDULE, local(20)) == (local(23), OperatingMode.CHARGE)
+    assert next_schedule_change(SCHEDULE, local(19)) == (local(23), OperatingMode.CHARGE)
+
+
+def test_no_schedule() -> None:
+    """Without a schedule nothing changes and the hub matches load."""
+    assert next_schedule_change((), local(12)) is None
+    assert scheduled_mode_at((), local(12)) == (OperatingMode.MATCH, None)
+
+
+async def test_auth_failure_during_polling_starts_reauth(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """A key revoked while running asks the user to re-authenticate."""
+    cloud.respond("GET", STATUS, status=HTTPStatus.UNAUTHORIZED)
+    await refresh(hass, init_integration.runtime_data.status)
+    flows = hass.config_entries.flow.async_progress()
+    assert [flow["context"]["source"] for flow in flows] == [SOURCE_REAUTH]
+
+
+async def test_metadata_failure_keeps_aliases(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """Metadata is optional: failures keep the last aliases and never reauth."""
+    cloud.respond("GET", METADATA, status=HTTPStatus.UNAUTHORIZED)
+    status = init_integration.runtime_data.status
+    await refresh(hass, status)
+    assert status.last_update_success
+    assert status.data.batteries["bat01"].alias == "Garage battery"
+    assert status.data.grid_meters[0].id == "grid1"
+    assert hass.config_entries.flow.async_progress() == []
+
+
+async def test_settings_partial_failure_keeps_previous(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """One failed settings read keeps its last value and updates the rest."""
+    settings = init_integration.runtime_data.settings
+    soc = load_fixture("config_soc.json")
+    soc["value"][0]["config"]["minSoc"] = 30
+    cloud.respond("GET", SOC_CONFIG, json=soc)
+    cloud.respond("GET", MAX_CHARGE, status=HTTPStatus.REQUEST_TIMEOUT)
+    await refresh(hass, settings)
+
+    assert settings.last_update_success
+    assert settings.data.soc_limits["bat01"].min_soc == 30
+    assert settings.data.power_limits[PowerLimitKey.MAX_CHARGE].watts == 4400

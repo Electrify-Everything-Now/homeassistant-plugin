@@ -8,7 +8,7 @@ Requires Home Assistant 2025.1 or later and an Anode account with an API key.
 
 ### HACS
 
-1. In HACS, open the menu (⋮) and choose **Custom repositories**. Add `https://github.com/anode-energy/anode-ha` with the category **Integration**.
+1. In HACS, open the menu (⋮) and choose **Custom repositories**. Add `https://github.com/Electrify-Everything-Now/homeassistant-plugin` with the category **Integration**.
 2. Search for **Anode** and install it.
 3. Restart Home Assistant.
 

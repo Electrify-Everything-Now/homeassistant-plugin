@@ -36,4 +36,5 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
+          # license: no LICENSE file yet. Remove from this list once one is added.
+          ignore: brands license

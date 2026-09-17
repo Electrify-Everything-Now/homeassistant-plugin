@@ -11,7 +11,7 @@ from datetime import time
 from enum import StrEnum
 import json
 import logging
-from typing import Any
+from typing import Any, Final
 
 from .exceptions import AnodeCommandError, AnodeResponseError
 
@@ -581,6 +581,79 @@ def parse_power_limit(value: Any) -> PowerLimit:
     if (watts := _number(value)) is not None:
         return PowerLimit(watts=watts, percent=None)
     raise AnodeResponseError(f"Unrecognised power limit value: {value!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class LinkCode:
+    """A pending account link, from ``POST /device-auth/request``."""
+
+    device_code: str
+    user_code: str
+    verification_url: str
+    verification_url_complete: str
+    expires_in: int
+    interval: int
+
+    @classmethod
+    def from_api(cls, data: Any) -> LinkCode:
+        """Parse a link request response."""
+        data = require_dict(data, "link request")
+        device_code, user_code = _str(data.get("deviceCode")), _str(data.get("userCode"))
+        url = _str(data.get("verificationUrl"))
+        if not device_code or not user_code or not url:
+            raise AnodeResponseError("Link request response is missing its codes")
+        return cls(
+            device_code=device_code,
+            user_code=user_code,
+            verification_url=url,
+            verification_url_complete=_str(data.get("verificationUrlComplete")) or url,
+            expires_in=_int(data.get("expiresIn")) or 900,
+            interval=max(_int(data.get("interval")) or 0, 0),
+        )
+
+
+# What a key may reach. The full table is the Anode API's, but these are the
+# only two this integration ever asks for: everything it reads is device:read,
+# and the overrides and limits it writes are device:control.
+SCOPE_DEVICE_READ: Final = "device:read"
+SCOPE_DEVICE_CONTROL: Final = "device:control"
+
+# Scopes reach one hub rather than everything the approving account reaches.
+BINDING_HUB: Final = "hub"
+
+
+@dataclass(frozen=True, slots=True)
+class LinkGrant:
+    """An approved account link, from ``POST /device-auth/token``."""
+
+    api_key: str
+    email: str
+    scopes: frozenset[str]
+    binding: str
+    #: The hub the key is bound to. None when it is bound to the account.
+    hub_id: str | None
+
+    @property
+    def read_only(self) -> bool:
+        """Whether the key may only read, so no controls are offered."""
+        return SCOPE_DEVICE_CONTROL not in self.scopes
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> LinkGrant:
+        """Parse an approved token response."""
+        api_key, email = _str(data.get("apiKey")), _str(data.get("email"))
+        if not api_key or not email:
+            raise AnodeResponseError("Approved link response is missing its key or account")
+        scopes = data.get("scopes")
+        if not isinstance(scopes, list):
+            raise AnodeResponseError("Approved link response is missing its scopes")
+        return cls(
+            api_key=api_key,
+            email=email,
+            scopes=frozenset(filter(None, (_str(scope) for scope in scopes))),
+            binding=_str(data.get("binding")) or BINDING_HUB,
+            hub_id=_str(data.get("hubId")),
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,7 +11,7 @@ from homeassistant.helpers import config_validation as cv, device_registry as dr
 from .api import OperatingMode
 from .const import CONF_HUB_ID, DOMAIN
 from .coordinator import AnodeConfigEntry
-from .entity import async_run_command
+from .entity import async_run_command, is_read_only
 
 SERVICE_SET_OVERRIDE = "set_override"
 SERVICE_CANCEL_OVERRIDE = "cancel_override"
@@ -79,6 +79,12 @@ def _async_get_entry(hass: HomeAssistant, call: ServiceCall) -> AnodeConfigEntry
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="hub_not_loaded",
+            translation_placeholders={"hub_id": entry.data[CONF_HUB_ID]},
+        )
+    if is_read_only(entry):
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="read_only",
             translation_placeholders={"hub_id": entry.data[CONF_HUB_ID]},
         )
     return entry

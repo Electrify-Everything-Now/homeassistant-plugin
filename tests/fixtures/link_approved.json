@@ -1,0 +1,9 @@
+{
+  "status": "approved",
+  "apiKey": "linked-api-key",
+  "email": "owner@example.com",
+  "deviceId": null,
+  "hubId": "ehxbt",
+  "scopes": ["device:read", "device:control"],
+  "binding": "hub"
+}

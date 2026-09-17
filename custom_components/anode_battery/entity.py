@@ -13,9 +13,14 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
-from .api import AnodeAuthError, AnodeError, AnodeHubOfflineError
-from .const import DOMAIN
+from .api import AnodeAuthError, AnodeError, AnodeForbiddenError, AnodeHubOfflineError
+from .const import CONF_READ_ONLY, DOMAIN
 from .coordinator import AnodeConfigEntry
+
+
+def is_read_only(entry: AnodeConfigEntry) -> bool:
+    """Whether the entry's key may only read, so no controls are offered."""
+    return bool(entry.data.get(CONF_READ_ONLY))
 
 
 def device_info(device_id: str) -> DeviceInfo:
@@ -74,6 +79,14 @@ async def async_run_command(
     """Await a hub command, turning client errors into user-facing errors."""
     try:
         await command
+    except AnodeForbiddenError as err:
+        # The key works but may not make changes, so re-authenticating with the
+        # same access would not help.
+        raise HomeAssistantError(
+            "Anode refused the change for this key",
+            translation_domain=DOMAIN,
+            translation_key="not_permitted",
+        ) from err
     except AnodeAuthError as err:
         entry.async_start_reauth(hass)
         raise HomeAssistantError(

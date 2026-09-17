@@ -21,7 +21,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import PowerLimit, PowerLimitKey, SocLimits
 from .const import DOMAIN, MAX_OVERRIDE_DURATION_MIN
 from .coordinator import AnodeConfigEntry, AnodeRuntimeData, AnodeSettingsCoordinator
-from .entity import AnodeEntity, async_run_command, async_setup_dynamic_entities, device_info
+from .entity import (
+    AnodeEntity,
+    async_run_command,
+    async_setup_dynamic_entities,
+    device_info,
+    is_read_only,
+)
 
 PARALLEL_UPDATES = 1
 
@@ -104,6 +110,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Anode number entities."""
+    # Every number here changes the hub, or only matters for a change.
+    if is_read_only(entry):
+        return
     runtime = entry.runtime_data
 
     def build() -> Iterator[Entity]:

@@ -37,6 +37,8 @@ Both give the same sensors and controls. Linking is the easier of the two and ha
 
 Home Assistant finishes setting up by itself. The code lasts 15 minutes.
 
+To approve on your phone instead, choose **Link by scanning a QR code**. It shows the same code as a QR code to scan, then waits in the same way; select **Submit** to carry on, either before or after you approve it.
+
 Approving grants Home Assistant two things, and nothing else: seeing live readings and settings, and changing modes, schedules and power levels. The key reaches only the hub you chose, even on an account that reaches more than one. It appears in the Anode web app under **Settings → API keys**, named after the code you approved, where you can revoke it.
 
 ### Enter an API key

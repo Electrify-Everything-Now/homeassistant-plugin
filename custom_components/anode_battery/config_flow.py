@@ -21,6 +21,9 @@ from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    QrCodeSelector,
+    QrCodeSelectorConfig,
+    QrErrorCorrectionLevel,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -61,7 +64,14 @@ from .coordinator import AnodeConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
-CONNECTION_MENU = ["link", "api_key"]
+# Linking twice over: the plain step waits on its own, and the QR step shows a
+# code to scan from a phone first. Approving on a phone is the reason the second
+# exists, so it is offered rather than made the only way in.
+CONNECTION_MENU = ["link", "link_qr", "api_key"]
+
+# Big enough to scan from a phone held in front of a monitor. Quartile recovery
+# because a screen photographed at an angle loses corners.
+QR_SCALE = 6
 
 CREDENTIALS_SCHEMA = vol.Schema(
     {
@@ -112,6 +122,7 @@ class AnodeConfigFlow(ConfigFlow, domain=DOMAIN):
         self._link_code: LinkCode | None = None
         self._link_task: asyncio.Task[LinkGrant] | None = None
         self._grant: LinkGrant | None = None
+        self._qr_shown = False
 
     def _client(self, credentials: Mapping[str, str] | None = None) -> AnodeClient:
         return AnodeClient(
@@ -260,21 +271,74 @@ class AnodeConfigFlow(ConfigFlow, domain=DOMAIN):
         location = self.hass.config.location_name
         return f"Home Assistant ({location})" if location else "Home Assistant"
 
+    async def _async_start_link(self) -> ConfigFlowResult | None:
+        """Ask for a code and start polling, or return the abort to show.
+
+        Polling runs from the moment the code is issued, whether or not the
+        waiting screen is on show yet, so a code approved while the QR is still
+        up is already collected by the time the flow moves on.
+        """
+        if self._link_task is not None:
+            return None
+        try:
+            self._link_code = await self._client().start_link(self._link_client_name())
+        except AnodeRateLimitError:
+            return self.async_abort(reason="link_rate_limited")
+        except AnodeError as err:
+            _LOGGER.debug("Could not start linking: %s", err)
+            return self.async_abort(reason="cannot_connect")
+        # A fresh code has not been shown yet, so a second run through the QR
+        # step shows it rather than going straight back to waiting.
+        self._qr_shown = False
+        self._link_task = self.hass.async_create_task(
+            self._async_wait_for_link(self._link_code)
+        )
+        return None
+
+    async def async_step_link_qr(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show a code to scan, for approving on a phone, then wait here."""
+        if (abort := await self._async_start_link()) is not None:
+            return abort
+        assert self._link_code is not None
+
+        # Home Assistant re-enters whichever step put the waiting screen up, so
+        # once the code has been seen this step has to be that screen too.
+        self._qr_shown = self._qr_shown or user_input is not None
+        if self._qr_shown:
+            return await self._async_link_progress()
+
+        return self.async_show_form(
+            step_id="link_qr",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("qr_code"): QrCodeSelector(
+                        config=QrCodeSelectorConfig(
+                            data=self._link_code.verification_url_complete,
+                            scale=QR_SCALE,
+                            error_correction_level=QrErrorCorrectionLevel.QUARTILE,
+                        )
+                    )
+                }
+            ),
+            description_placeholders={
+                "url": self._link_code.verification_url_complete,
+                "code": self._link_code.user_code,
+            },
+        )
+
     async def async_step_link(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Show the link and wait for the account holder to approve it."""
-        if self._link_task is None:
-            try:
-                self._link_code = await self._client().start_link(self._link_client_name())
-            except AnodeRateLimitError:
-                return self.async_abort(reason="link_rate_limited")
-            except AnodeError as err:
-                _LOGGER.debug("Could not start linking: %s", err)
-                return self.async_abort(reason="cannot_connect")
-            self._link_task = self.hass.async_create_task(
-                self._async_wait_for_link(self._link_code)
-            )
+        if (abort := await self._async_start_link()) is not None:
+            return abort
+        return await self._async_link_progress()
+
+    async def _async_link_progress(self) -> ConfigFlowResult:
+        """Wait on the polling task, from whichever step is showing the wait."""
+        assert self._link_code is not None and self._link_task is not None
 
         if not self._link_task.done():
             return self.async_show_progress(

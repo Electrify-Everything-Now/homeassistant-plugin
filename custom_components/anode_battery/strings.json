@@ -3,10 +3,21 @@
     "step": {
       "user": {
         "title": "Connect to Anode",
-        "description": "**Link with your Anode account** to approve Home Assistant in the Anode web app, with no key to copy. It reaches only the hub you choose.\n\n**Enter an API key** if you would rather create a key by hand, or if your account has no hub of its own. Create one in the Anode web app under Settings → API.",
+        "description": "**Link with your Anode account** to approve Home Assistant in the Anode web app, with no key to copy. It reaches only the hub you choose, and there is a QR code version if you would rather approve it on your phone.\n\n**Enter an API key** if you would rather create a key by hand, or if your account has no hub of its own. Create one in the Anode web app under Settings → API.",
         "menu_options": {
           "link": "Link with your Anode account",
+          "link_qr": "Link by scanning a QR code",
           "api_key": "Enter an API key"
+        }
+      },
+      "link_qr": {
+        "title": "Scan to approve",
+        "description": "Scan this with the phone you use for Anode. It opens the link page with code **{code}** already filled in; sign in if asked, check the code matches, choose your hub and select **Allow**.\n\nYou can also open [the link page]({url}) on this device. Select **Submit** to carry on: Home Assistant finishes as soon as the link is approved, whether you approve it before or after. The code lasts 15 minutes.",
+        "data": {
+          "qr_code": "Anode link code"
+        },
+        "data_description": {
+          "qr_code": "Scan this to open the Anode link page with the code filled in."
         }
       },
       "api_key": {
@@ -26,6 +37,7 @@
         "description": "The code ran out before it was approved.",
         "menu_options": {
           "link": "Get a new code",
+          "link_qr": "Get a new code to scan",
           "api_key": "Enter an API key instead"
         }
       },
@@ -44,6 +56,7 @@
         "description": "Anode no longer accepts the credentials for hub {hub_id}. Link again, or enter a new API key.",
         "menu_options": {
           "link": "Link with your Anode account",
+          "link_qr": "Link by scanning a QR code",
           "api_key": "Enter an API key"
         }
       },
@@ -52,6 +65,7 @@
         "description": "Choose how to connect to hub {hub_id}. Linking replaces the credentials with a key Anode issues for this hub; an API key is one you create by hand.",
         "menu_options": {
           "link": "Link with your Anode account",
+          "link_qr": "Link by scanning a QR code",
           "api_key": "Enter an API key"
         }
       }

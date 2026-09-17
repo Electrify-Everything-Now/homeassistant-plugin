@@ -64,7 +64,7 @@ async def test_connection_menu(hass: HomeAssistant) -> None:
     """Setup starts by choosing how to connect."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     assert result["type"] is FlowResultType.MENU
-    assert result["menu_options"] == ["link", "api_key"]
+    assert result["menu_options"] == ["link", "link_qr", "api_key"]
 
 
 @pytest.mark.usefixtures("mock_setup_entry")

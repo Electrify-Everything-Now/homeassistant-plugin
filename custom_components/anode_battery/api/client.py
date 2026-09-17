@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Final
 from urllib.parse import quote
 
 import aiohttp
@@ -14,15 +15,23 @@ from .exceptions import (
     AnodeError,
     AnodeForbiddenError,
     AnodeHubOfflineError,
+    AnodeLinkDeniedError,
+    AnodeLinkExpiredError,
+    AnodeLinkFailedError,
     AnodeNotFoundError,
     AnodeRateLimitError,
     AnodeResponseError,
 )
 from .models import (
+    BINDING_HUB,
+    SCOPE_DEVICE_CONTROL,
+    SCOPE_DEVICE_READ,
     AccountHub,
     BatteryReading,
     DeviceMetadata,
     HubStatus,
+    LinkCode,
+    LinkGrant,
     MeterReading,
     OperatingMode,
     PowerLimit,
@@ -58,25 +67,35 @@ def _hub(hub_id: str) -> str:
     return quote(hub_id, safe="")
 
 
+LINK_CLIENT_KIND = "home-assistant"
+
+#: What linking asks the account holder for: everything this integration reads
+#: is ``device:read``, and the overrides and limits it writes are
+#: ``device:control``. Nothing here reads history, so no ``telemetry:read``.
+LINK_SCOPES: Final = (SCOPE_DEVICE_READ, SCOPE_DEVICE_CONTROL)
+
+
 class AnodeClient:
     """Client for one Anode account.
 
-    Authenticates with HTTP Basic auth: the account email is the username and
-    an API key from the Anode web app is the password.
+    With an email and API key it uses HTTP Basic auth, as keys created in the
+    Anode web app expect. With a key alone it uses a bearer token, as keys
+    issued by account linking expect. With neither it can only link.
     """
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        email: str,
-        api_key: str,
+        email: str | None,
+        api_key: str | None,
         *,
         base_url: str = API_BASE_URL,
         request_timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         """Initialise the client."""
         self._session = session
-        self._auth = aiohttp.BasicAuth(email, api_key)
+        self._auth = aiohttp.BasicAuth(email, api_key) if email and api_key else None
+        self._headers = {"Authorization": f"Bearer {api_key}"} if api_key and not email else None
         self._base_url = base_url.rstrip("/")
         self._timeout = request_timeout
 
@@ -94,6 +113,7 @@ class AnodeClient:
                     method,
                     f"{self._base_url}{path}",
                     auth=self._auth,
+                    headers=self._headers,
                     params=params,
                     json=json,
                 ) as response:
@@ -113,6 +133,60 @@ class AnodeClient:
             raise AnodeConnectionError(f"{method} {path} timed out") from err
         except aiohttp.ClientError as err:
             raise AnodeConnectionError(f"{method} {path} failed: {err}") from err
+
+    async def start_link(
+        self,
+        client_name: str,
+        scopes: Iterable[str] = LINK_SCOPES,
+        *,
+        binding: str = BINDING_HUB,
+    ) -> LinkCode:
+        """Ask for a code the account holder approves in the Anode web app.
+
+        The grant is all or nothing, so ``scopes`` asks for what this client
+        needs and no more. ``binding`` keeps the key to the one hub chosen at
+        approval rather than everything the approving account reaches.
+        """
+        data = await self._request(
+            "POST",
+            "/device-auth/request",
+            json={
+                "clientKind": LINK_CLIENT_KIND,
+                "clientName": client_name[:64],
+                "scopes": list(scopes),
+                "binding": binding,
+            },
+        )
+        return LinkCode.from_api(data)
+
+    async def poll_link(self, device_code: str) -> LinkGrant | None:
+        """Collect the key for an approved link; None while still waiting.
+
+        Raises AnodeLinkDeniedError if refused, and AnodeLinkExpiredError once
+        the code has run out or its key was already collected.
+        """
+        try:
+            data = await self._request(
+                "POST", "/device-auth/token", json={"deviceCode": device_code}
+            )
+        except AnodeNotFoundError as err:
+            raise AnodeLinkExpiredError("The link code expired") from err
+        data = require_dict(data, "link token")
+        status = data.get("status")
+        if status == "pending":
+            return None
+        if status == "denied":
+            raise AnodeLinkDeniedError("The link request was refused")
+        if status == "expired":
+            raise AnodeLinkExpiredError("The link code expired")
+        if status == "approved":
+            # Collecting spends the code, so an approval we cannot read is not
+            # worth polling again for: the key it issued is already gone.
+            try:
+                return LinkGrant.from_api(data)
+            except AnodeResponseError as err:
+                raise AnodeLinkFailedError(str(err)) from err
+        raise AnodeResponseError(f"Unexpected link status {status!r}")
 
     async def get_account_hub(self) -> AccountHub:
         """Return the hub linked to this account.

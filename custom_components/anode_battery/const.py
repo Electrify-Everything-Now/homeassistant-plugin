@@ -8,6 +8,15 @@ DOMAIN: Final = "anode_battery"
 MANUFACTURER: Final = "Anode"
 
 CONF_HUB_ID: Final = "hub_id"
+# How the entry authenticates. Entries from before linking have no value and
+# use an API key.
+CONF_AUTH_TYPE: Final = "auth_type"
+AUTH_API_KEY: Final = "api_key"
+AUTH_LINK: Final = "link"
+# Set for linked entries whose key may only read.
+CONF_READ_ONLY: Final = "read_only"
+# Lower bound on how often to poll for an approved link, in seconds.
+LINK_MIN_POLL_INTERVAL: Final = 1
 
 # Options
 CONF_STATUS_INTERVAL: Final = "status_update_interval"

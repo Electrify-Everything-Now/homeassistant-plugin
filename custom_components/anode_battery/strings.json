@@ -3,7 +3,15 @@
     "step": {
       "user": {
         "title": "Connect to Anode",
-        "description": "Sign in with the email for your Anode account and an API key. Create a key in the Anode web app under Settings → API.",
+        "description": "**Link with your Anode account** to approve Home Assistant in the Anode web app, with no key to copy. It reaches only the hub you choose.\n\n**Enter an API key** if you would rather create a key by hand, or if your account has no hub of its own. Create one in the Anode web app under Settings → API.",
+        "menu_options": {
+          "link": "Link with your Anode account",
+          "api_key": "Enter an API key"
+        }
+      },
+      "api_key": {
+        "title": "Enter an API key",
+        "description": "Use the email for your Anode account and an API key created in the Anode web app under Settings → API.",
         "data": {
           "email": "Email",
           "api_key": "API key"
@@ -11,6 +19,14 @@
         "data_description": {
           "email": "The email address you sign in to the Anode web app with.",
           "api_key": "An API key created in the Anode web app."
+        }
+      },
+      "link_expired": {
+        "title": "Link code expired",
+        "description": "The code ran out before it was approved.",
+        "menu_options": {
+          "link": "Get a new code",
+          "api_key": "Enter an API key instead"
         }
       },
       "hub": {
@@ -25,20 +41,23 @@
       },
       "reauth_confirm": {
         "title": "Re-authenticate Anode",
-        "description": "Anode no longer accepts the API key for hub {hub_id}. Enter a new key.",
-        "data": {
-          "email": "Email",
-          "api_key": "API key"
+        "description": "Anode no longer accepts the credentials for hub {hub_id}. Link again, or enter a new API key.",
+        "menu_options": {
+          "link": "Link with your Anode account",
+          "api_key": "Enter an API key"
         }
       },
       "reconfigure": {
-        "title": "Update Anode credentials",
-        "description": "Change the account email or API key used for hub {hub_id}.",
-        "data": {
-          "email": "Email",
-          "api_key": "API key"
+        "title": "Change how Home Assistant connects",
+        "description": "Choose how to connect to hub {hub_id}. Linking replaces the credentials with a key Anode issues for this hub; an API key is one you create by hand.",
+        "menu_options": {
+          "link": "Link with your Anode account",
+          "api_key": "Enter an API key"
         }
       }
+    },
+    "progress": {
+      "wait_for_link": "Open the [Anode link page]({url}), check it shows code **{code}**, choose your hub and select **Allow**.\n\nYou will be asked to allow Home Assistant to see live readings and settings, and to change modes, schedules and power levels. This step finishes by itself once you approve. The code lasts 15 minutes."
     },
     "error": {
       "cannot_connect": "Could not reach the Anode cloud. Check your internet connection and try again.",
@@ -50,7 +69,13 @@
     "abort": {
       "already_configured": "This hub is already set up.",
       "reauth_successful": "Re-authenticated successfully.",
-      "reconfigure_successful": "Credentials updated."
+      "reconfigure_successful": "Credentials updated.",
+      "cannot_connect": "Could not reach the Anode cloud. Check your internet connection and try again.",
+      "link_denied": "Home Assistant was not allowed access in the Anode web app.",
+      "link_rate_limited": "Too many link codes were requested from this network. Try again in an hour, or enter an API key instead.",
+      "wrong_hub": "That link is for a different hub. Choose the hub this integration was set up for.",
+      "link_insufficient": "Anode did not give Home Assistant the access it asked for. Check the account is allowed to share the hub, then try again or enter an API key instead.",
+      "link_failed": "Linking was approved but Anode's answer could not be used, so the key it issued is gone. Try linking again, or enter an API key instead."
     }
   },
   "options": {
@@ -278,6 +303,12 @@
     },
     "hub_not_loaded": {
       "message": "Anode hub {hub_id} is not loaded. Check the integration in Settings → Devices & services."
+    },
+    "read_only": {
+      "message": "Anode hub {hub_id} is linked with read-only access, so it cannot be controlled. Reconfigure the integration to link again, which asks for control as well."
+    },
+    "not_permitted": {
+      "message": "Anode did not allow this key to make changes. Reconfigure the integration to link again, or use an API key with full access."
     }
   },
   "issues": {

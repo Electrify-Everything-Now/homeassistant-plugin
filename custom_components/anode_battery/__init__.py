@@ -18,6 +18,8 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api import AnodeClient, HubStatus
 from .const import (
+    AUTH_LINK,
+    CONF_AUTH_TYPE,
     CONF_DEVICE_INTERVAL,
     CONF_HUB_ID,
     CONF_STATUS_INTERVAL,
@@ -59,9 +61,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> bool:
     """Set up an Anode hub from a config entry."""
     hub_id: str = entry.data[CONF_HUB_ID]
-    client = AnodeClient(
-        async_get_clientsession(hass), entry.data[CONF_EMAIL], entry.data[CONF_API_KEY]
-    )
+    # Keys from linking are presented on their own; hand-made keys with the email.
+    email = None if entry.data.get(CONF_AUTH_TYPE) == AUTH_LINK else entry.data[CONF_EMAIL]
+    client = AnodeClient(async_get_clientsession(hass), email, entry.data[CONF_API_KEY])
     status = AnodeStatusCoordinator(
         hass,
         entry,

@@ -1,0 +1,8 @@
+{
+  "deviceCode": "test-device-code",
+  "userCode": "BCDF-GHJK",
+  "verificationUrl": "https://anode.energy/link",
+  "verificationUrlComplete": "https://anode.energy/link?code=BCDF-GHJK",
+  "expiresIn": 900,
+  "interval": 5
+}

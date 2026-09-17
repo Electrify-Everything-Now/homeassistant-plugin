@@ -3,7 +3,7 @@
 Deliberately free of Home Assistant imports so it can be published to PyPI
 as a standalone package and listed in the manifest's ``requirements``.
 """
-from .client import API_BASE_URL, AnodeClient
+from .client import API_BASE_URL, LINK_CLIENT_KIND, LINK_SCOPES, AnodeClient
 from .exceptions import (
     AnodeAuthError,
     AnodeCommandError,
@@ -11,16 +11,24 @@ from .exceptions import (
     AnodeError,
     AnodeForbiddenError,
     AnodeHubOfflineError,
+    AnodeLinkDeniedError,
+    AnodeLinkExpiredError,
+    AnodeLinkFailedError,
     AnodeNotFoundError,
     AnodeRateLimitError,
     AnodeResponseError,
 )
 from .models import (
+    BINDING_HUB,
+    SCOPE_DEVICE_CONTROL,
+    SCOPE_DEVICE_READ,
     AccountHub,
     BatteryReading,
     BmsReading,
     DeviceMetadata,
     HubStatus,
+    LinkCode,
+    LinkGrant,
     MeterReading,
     MeterType,
     OperatingMode,
@@ -33,6 +41,11 @@ from .models import (
 
 __all__ = [
     "API_BASE_URL",
+    "BINDING_HUB",
+    "LINK_CLIENT_KIND",
+    "LINK_SCOPES",
+    "SCOPE_DEVICE_CONTROL",
+    "SCOPE_DEVICE_READ",
     "AccountHub",
     "AnodeAuthError",
     "AnodeClient",
@@ -41,6 +54,9 @@ __all__ = [
     "AnodeError",
     "AnodeForbiddenError",
     "AnodeHubOfflineError",
+    "AnodeLinkDeniedError",
+    "AnodeLinkExpiredError",
+    "AnodeLinkFailedError",
     "AnodeNotFoundError",
     "AnodeRateLimitError",
     "AnodeResponseError",
@@ -48,6 +64,8 @@ __all__ = [
     "BmsReading",
     "DeviceMetadata",
     "HubStatus",
+    "LinkCode",
+    "LinkGrant",
     "MeterReading",
     "MeterType",
     "OperatingMode",

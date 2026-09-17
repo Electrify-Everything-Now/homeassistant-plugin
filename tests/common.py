@@ -38,6 +38,8 @@ MAX_CHARGE = f"/device/config/{HUB_ID}/maxChargePower"
 MAX_DISCHARGE = f"/device/config/{HUB_ID}/maxDischargePower"
 SET_CONFIG = f"/device/config/{HUB_ID}"
 OVERRIDE = f"/device/{HUB_ID}/override"
+LINK_REQUEST = "/device-auth/request"
+LINK_TOKEN = "/device-auth/token"
 
 DEFAULT_ROUTES: tuple[tuple[str, str, str], ...] = (
     ("GET", ACCOUNT, "account_devices.json"),
@@ -52,6 +54,8 @@ DEFAULT_ROUTES: tuple[tuple[str, str, str], ...] = (
     ("GET", MAX_DISCHARGE, "config_max_discharge_power.json"),
     ("PUT", SET_CONFIG, "hub_ack.json"),
     ("PUT", OVERRIDE, "override_ack.json"),
+    ("POST", LINK_REQUEST, "link_request.json"),
+    ("POST", LINK_TOKEN, "link_approved.json"),
 )
 
 # Single-battery reads (?id=...). Only bat01's firmware reports BMS data.
@@ -71,7 +75,8 @@ class AnodeCloud:
 
     Tests change a response with ``respond`` and inspect what was sent with
     ``calls``. A response can be limited to one query string, such as a
-    single battery's ``?id=``; other queries get the endpoint's default.
+    single battery's ``?id=``; other queries get the endpoint's default. A
+    ``sequence`` of responses is served in order, repeating the last.
     """
 
     def __init__(self, aioclient_mock: AiohttpClientMocker) -> None:
@@ -94,6 +99,7 @@ class AnodeCloud:
         text: str | None = None,
         status: int = HTTPStatus.OK,
         exc: BaseException | None = None,
+        sequence: list[dict[str, Any]] | None = None,
     ) -> None:
         """Set the response for an endpoint, optionally for one query only."""
         method = method.upper()
@@ -105,6 +111,7 @@ class AnodeCloud:
             "text": text,
             "status": status,
             "exc": exc,
+            "sequence": list(sequence) if sequence else None,
         }
 
     def _handler(self, method: str, path: str):
@@ -113,6 +120,9 @@ class AnodeCloud:
             route = self._routes.get((method, path, frozenset(url.query.items())))
             if route is None:
                 route = self._routes[(method, path, frozenset())]
+            if sequence := route["sequence"]:
+                step = sequence.pop(0) if len(sequence) > 1 else sequence[0]
+                route = {"json": None, "text": None, "status": HTTPStatus.OK, "exc": None, **step}
             return AiohttpClientMockResponse(
                 sent_method,
                 url,

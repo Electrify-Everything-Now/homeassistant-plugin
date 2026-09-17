@@ -7,7 +7,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import OperatingMode
 from .coordinator import AnodeConfigEntry, AnodeModeCoordinator, AnodeRuntimeData
-from .entity import AnodeEntity, async_run_command
+from .entity import AnodeEntity, async_run_command, is_read_only
 
 PARALLEL_UPDATES = 1
 
@@ -18,6 +18,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Anode select entities."""
+    if is_read_only(entry):
+        return
     async_add_entities([AnodeOverrideModeSelect(entry.runtime_data)])
 
 

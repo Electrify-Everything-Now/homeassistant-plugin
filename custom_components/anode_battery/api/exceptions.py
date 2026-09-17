@@ -36,3 +36,19 @@ class AnodeResponseError(AnodeError):
 
 class AnodeCommandError(AnodeError):
     """The hub received a command or read and reported that it failed."""
+
+
+class AnodeLinkDeniedError(AnodeError):
+    """The account holder refused a link request."""
+
+
+class AnodeLinkExpiredError(AnodeError):
+    """A link code ran out, or was already used, before a key was collected."""
+
+
+class AnodeLinkFailedError(AnodeError):
+    """A link was approved but the key it issued could not be used.
+
+    Never retried: collecting spends the code, so by the time this is raised
+    the grant is gone and only a new link request can replace it.
+    """

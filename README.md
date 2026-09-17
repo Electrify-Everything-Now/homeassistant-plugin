@@ -2,7 +2,7 @@
 
 Monitor and control an Anode battery system from Home Assistant: live power and state of charge for every battery and meter, lifetime energy counters for the Energy dashboard, and schedule overrides.
 
-Requires Home Assistant 2025.1 or later and an Anode account with an API key.
+Requires Home Assistant 2025.1 or later and an Anode account.
 
 ## Installation
 
@@ -19,11 +19,34 @@ Requires Home Assistant 2025.1 or later and an Anode account with an API key.
 
 ## Setup
 
-1. In the Anode web app, go to **Settings → API** and create an API key.
-2. In Home Assistant, go to **Settings → Devices & services → Add integration** and choose **Anode**.
-3. Enter your Anode email and the API key.
+In Home Assistant, go to **Settings → Devices & services → Add integration** and choose **Anode**. There are two ways to connect:
 
-The integration finds the hub on your account. If the account has no hub of its own, for example an installer account, it asks for the hub ID printed on the hub's label. To add another hub, add the integration again.
+| | Link with your Anode account | Enter an API key |
+| --- | --- | --- |
+| How | Approve Home Assistant in the Anode web app | Copy a key from the Anode web app |
+| Reaches | The one hub you choose when you approve it | Whatever the account reaches |
+| Use it when | You have a hub on your own account | The account has no hub of its own, such as an installer account |
+
+Both give the same sensors and controls. Linking is the easier of the two and hands out the narrower key, so it is the one to prefer.
+
+### Link with your Anode account
+
+1. Choose **Link with your Anode account**.
+2. Select the link Home Assistant shows. It opens the Anode web app with the code filled in; sign in if asked.
+3. Check the code matches, choose your hub and select **Allow**.
+
+Home Assistant finishes setting up by itself. The code lasts 15 minutes.
+
+Approving grants Home Assistant two things, and nothing else: seeing live readings and settings, and changing modes, schedules and power levels. The key reaches only the hub you chose, even on an account that reaches more than one. It appears in the Anode web app under **Settings → API keys**, named after the code you approved, where you can revoke it.
+
+### Enter an API key
+
+1. In the Anode web app, go to **Settings → API** and create an API key.
+2. Choose **Enter an API key** and enter your Anode email and the key.
+
+The integration finds the hub on your account. If the account has no hub of its own, for example an installer account, it asks for the hub ID printed on the hub's label.
+
+To add another hub, add the integration again.
 
 ### Options
 
@@ -40,7 +63,9 @@ Battery BMS readings (pack voltage, temperatures and cell voltages) need a separ
 
 ### Changing credentials
 
-Choose **Reconfigure** from the integration's menu. If Anode stops accepting the API key, Home Assistant asks you to re-authenticate.
+Choose **Reconfigure** from the integration's menu to link again or switch to an API key. If Anode stops accepting the credentials, for example because the link was revoked, Home Assistant asks you to re-authenticate in the same way.
+
+Linking again issues a new key and leaves the old one in place, so delete the one you have stopped using under **Settings → API keys** in the Anode web app. Each key is named after the code that was approved for it.
 
 ## Devices and entities
 
@@ -238,7 +263,7 @@ Entity IDs and history carry over. Changes you may notice:
 
 1. Go to **Settings → Devices & services → Anode**, open the menu (⋮) and choose **Delete**.
 2. Uninstall from HACS, or delete `custom_components/anode_battery`, then restart Home Assistant.
-3. If nothing else uses the API key, delete it in the Anode web app.
+3. Delete the key in the Anode web app under **Settings → API keys**: the one linking issued, or the one you created by hand if nothing else uses it.
 
 ## Development
 

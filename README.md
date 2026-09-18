@@ -94,6 +94,7 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Grid import energy today, Grid export energy today, House energy today, Battery charge energy today, Battery discharge energy today | Energy since midnight. See [Energy today](#energy-today) |
 | Battery energy capacity, Battery energy remaining, Average state of charge | Totals and capacity-weighted average across batteries |
 | Firmware version, Uptime | Diagnostic |
+| Firmware | Whether newer firmware is available for the device. Home Assistant reports it but cannot install it — see [Firmware updates](#firmware-updates) |
 
 ### Battery
 
@@ -114,6 +115,7 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Minimum state of charge, Maximum state of charge | The battery's operating window |
 | Online | Whether the hub reports the battery as connected |
 | Nominal voltage, Firmware version, Uptime | Diagnostic |
+| Firmware | Whether newer firmware is available for the device. Home Assistant reports it but cannot install it — see [Firmware updates](#firmware-updates) |
 
 ### Meter
 
@@ -125,8 +127,25 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Voltage, Current, Power factor | Disabled by default. Enable them from the entity's settings |
 | Online | Whether the hub reports the meter as connected |
 | Meter type, Parent meter, Firmware version, Uptime | Diagnostic |
+| Firmware | Whether newer firmware is available for the device. Home Assistant reports it but cannot install it — see [Firmware updates](#firmware-updates) |
 
 A meter is treated as a grid meter when its type is `PRIMARY` or its purpose in the Anode app is **Primary**, and as generation when its type is `EXT_INVERTER` or its purpose is **Solar**.
+
+## Firmware updates
+
+Each hub, battery and meter gets a **Firmware** entity that turns on when newer
+firmware is available for it, and shows the release notes for that version.
+
+Home Assistant cannot install Anode firmware. Applying an update takes the
+device through a reboot and needs a level of account access this integration
+deliberately does not ask for, so updates are applied from the Anode app or
+from your hub page in the Anode web dashboard. The entity clears by itself once
+the device comes back on the new version, and shows as installing while an
+update started elsewhere is running.
+
+A device only gets a **Firmware** entity once Anode knows what that device
+could be running. One that has no published firmware for its hardware revision
+has no entity rather than an entity stuck at "unknown".
 
 ## Energy dashboard
 

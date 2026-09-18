@@ -36,6 +36,8 @@ from .models import (
     OperatingMode,
     PowerLimit,
     PowerLimitKey,
+    ProductCode,
+    ReleaseNote,
     ScheduleSlot,
     SocLimits,
     parse_account_hub,
@@ -205,6 +207,25 @@ class AnodeClient:
         """Return web-UI aliases and meter purposes, keyed by device id."""
         data = await self._request("GET", f"/user/device-metadata/{_hub(hub_id)}")
         return parse_device_metadata(data)
+
+    async def get_release_note(
+        self, version: str, product_code: ProductCode
+    ) -> ReleaseNote | None:
+        """Return what changed in a firmware version, or None if nothing is published.
+
+        Not every version has a note: stable notes are written by hand, and the
+        dev ones are grown from commit messages, so a miss here is ordinary and
+        not an error.
+        """
+        try:
+            data = await self._request(
+                "GET",
+                "/device/release-notes",
+                params={"version": version, "productCode": str(int(product_code))},
+            )
+        except AnodeNotFoundError:
+            return None
+        return ReleaseNote.from_api(data)
 
     async def get_batteries(self, hub_id: str) -> dict[str, BatteryReading]:
         """Return readings for every battery the hub is using, in one request."""

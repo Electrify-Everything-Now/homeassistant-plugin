@@ -1,13 +1,55 @@
 {
   "status": true,
-  "hub": { "version": "2.4.1", "uptime": 86400000 },
+  "hub": {
+    "version": "2.4.1",
+    "uptime": 86400000,
+    "latestVersion": "2.5.0",
+    "updateAvailable": true
+  },
   "battery": [
-    { "id": "bat01", "version": "1.3.0", "uptime": 43200000, "online": true },
-    { "id": "bat02", "version": "1.3.0", "uptime": 43100000, "online": true }
+    {
+      "id": "bat01",
+      "version": "1.3.0",
+      "uptime": 43200000,
+      "online": true,
+      "latestVersion": "1.3.0",
+      "updateAvailable": false
+    },
+    {
+      "id": "bat02",
+      "version": "1.3.0",
+      "uptime": 43100000,
+      "online": true,
+      "latestVersion": "1.3.0",
+      "updateAvailable": false
+    }
   ],
   "meter": [
-    { "id": "grid1", "version": "1.1.0", "uptime": 43200000, "type": "PRIMARY", "online": true },
-    { "id": "solar1", "version": "1.1.0", "uptime": 43200000, "type": "EXT_INVERTER", "online": true },
-    { "id": "ev001", "version": "1.1.0", "uptime": 43200000, "type": "LOAD", "parentMeter": "grid1", "online": true }
+    {
+      "id": "grid1",
+      "version": "1.1.0",
+      "uptime": 43200000,
+      "type": "PRIMARY",
+      "online": true,
+      "latestVersion": "1.2.0",
+      "updateAvailable": true
+    },
+    {
+      "id": "solar1",
+      "version": "1.1.0",
+      "uptime": 43200000,
+      "type": "EXT_INVERTER",
+      "online": true,
+      "latestVersion": "1.2.0",
+      "updateAvailable": true
+    },
+    {
+      "id": "ev001",
+      "version": "1.1.0",
+      "uptime": 43200000,
+      "type": "LOAD",
+      "parentMeter": "grid1",
+      "online": true
+    }
   ]
 }

@@ -285,6 +285,11 @@
       "cell_voltage": {
         "name": "Cell {cell} voltage"
       }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
+      }
     }
   },
   "exceptions": {

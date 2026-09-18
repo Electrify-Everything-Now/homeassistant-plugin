@@ -141,6 +141,11 @@
       "parent_meter": {
         "default": "mdi:link"
       }
+    },
+    "update": {
+      "firmware": {
+        "default": "mdi:chip"
+      }
     }
   },
   "services": {

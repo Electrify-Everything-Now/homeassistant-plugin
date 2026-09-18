@@ -1,0 +1,9 @@
+{
+  "id": 42,
+  "version": "2.5.0",
+  "productCode": 1,
+  "stream": "stable",
+  "summary": "Faster grid response and steadier charging.",
+  "whatsNew": "Match mode reacts to grid changes within a second.",
+  "whatsFixed": "Fixed a stall when a meter dropped out mid-slot."
+}

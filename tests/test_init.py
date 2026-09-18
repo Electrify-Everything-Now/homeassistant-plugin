@@ -116,6 +116,12 @@ EXPECTED_UNIQUE_IDS = {
     },
     "select": {f"{HUB_ID}_override_mode"},
     "button": {f"{HUB_ID}_cancel_override"},
+    # ev001 is the one device the status fixture reports no firmware verdict
+    # for, so it is the one device with no update entity.
+    "update": {
+        f"{HUB_ID}_firmware",
+        *(f"{device}_firmware" for device in ("bat01", "bat02", "grid1", "solar1")),
+    },
 }
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import time
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 import json
 import logging
 from typing import Any, Final
@@ -41,6 +41,19 @@ class PowerLimitKey(StrEnum):
 
     MAX_CHARGE = "maxChargePower"
     MAX_DISCHARGE = "maxDischargePower"
+
+
+class ProductCode(IntEnum):
+    """The product catalogue's codes, as release notes are keyed by.
+
+    The hub reports what each device is by which array it appears in, so
+    nothing here has to be decoded out of a device id.
+    """
+
+    HUB = 1
+    METER = 2
+    BATTERY = 3
+    REPEATER = 4
 
 
 # Unit factors, keyed by lower-cased unit string.
@@ -155,6 +168,11 @@ class SubDevice:
     online: bool | None = None
     alias: str | None = None
     meter_purpose: str | None = None
+    #: What the firmware train holds for this device, or None when the server
+    #: could not work that out. See ``HubStatus.latest_version``.
+    latest_version: str | None = None
+    update_available: bool = False
+    ota_in_progress: bool = False
 
     @classmethod
     def from_api(cls, data: Any) -> SubDevice:
@@ -169,6 +187,9 @@ class SubDevice:
             meter_type=_enum(MeterType, data.get("type")),
             parent_meter=_str(data.get("parentMeter")),
             online=_bool(data.get("online")),
+            latest_version=_str(data.get("latestVersion")),
+            update_available=data.get("updateAvailable") is True,
+            ota_in_progress=data.get("otaInProgress") is True,
         )
 
     @property
@@ -195,6 +216,20 @@ class HubStatus:
     batteries: dict[str, SubDevice]
     meters: dict[str, SubDevice]
     alias: str | None = None
+    #: The newest image the account's firmware train holds for this hardware.
+    #:
+    #: The server joins the versions the hub reports against the images on the
+    #: OTA share, so nothing here compares version strings. It is None whenever
+    #: the server could not reach an answer — an unknown product, no image for
+    #: this hardware revision, a version string it could not parse — and that
+    #: absence is deliberately not filled in with the installed version, which
+    #: would read as "up to date" when in fact nobody knows.
+    latest_version: str | None = None
+    #: Whether the train holds something strictly newer. Not the same question
+    #: as ``latest_version != version``: a device ahead of its train is not
+    #: offered a downgrade.
+    update_available: bool = False
+    ota_in_progress: bool = False
 
     @classmethod
     def from_api(cls, hub_id: str, data: Any) -> HubStatus:
@@ -208,6 +243,9 @@ class HubStatus:
             uptime_ms=_int(hub.get("uptime")),
             batteries=_parse_sub_devices(data.get("battery")),
             meters=_parse_sub_devices(data.get("meter")),
+            latest_version=_str(hub.get("latestVersion")),
+            update_available=hub.get("updateAvailable") is True,
+            ota_in_progress=hub.get("otaInProgress") is True,
         )
 
     def with_metadata(self, metadata: dict[str, DeviceMetadata]) -> HubStatus:
@@ -248,6 +286,34 @@ def _parse_sub_devices(items: Any) -> dict[str, SubDevice]:
             continue
         devices[device.id] = device
     return devices
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseNote:
+    """What changed in one firmware version, from ``GET /device/release-notes``.
+
+    Which stream the note is taken from is the server's decision, made from the
+    account's own firmware preference, so nothing here names a stream.
+    """
+
+    version: str
+    summary: str
+    whats_new: str | None = None
+    whats_fixed: str | None = None
+
+    @classmethod
+    def from_api(cls, data: Any) -> ReleaseNote:
+        """Parse a release note response."""
+        data = require_dict(data, "release note")
+        version, summary = _str(data.get("version")), _str(data.get("summary"))
+        if not version or not summary:
+            raise AnodeResponseError("Release note is missing its version or summary")
+        return cls(
+            version=version,
+            summary=summary,
+            whats_new=_str(data.get("whatsNew")),
+            whats_fixed=_str(data.get("whatsFixed")),
+        )
 
 
 def _unit_values(data: dict[str, Any], key: str) -> tuple[list[float], str] | None:

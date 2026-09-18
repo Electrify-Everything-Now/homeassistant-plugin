@@ -32,6 +32,7 @@ METADATA = f"/user/device-metadata/{HUB_ID}"
 BATTERIES = f"/device/battery/{HUB_ID}"
 METERS = f"/device/meter/{HUB_ID}"
 MODE = f"/device/{HUB_ID}/mode"
+RELEASE_NOTES = "/device/release-notes"
 SCHEDULE = f"/device/schedule/{HUB_ID}"
 SOC_CONFIG = f"/device/config/{HUB_ID}/socConfig"
 MAX_CHARGE = f"/device/config/{HUB_ID}/maxChargePower"
@@ -48,6 +49,7 @@ DEFAULT_ROUTES: tuple[tuple[str, str, str], ...] = (
     ("GET", BATTERIES, "batteries.json"),
     ("GET", METERS, "meters.json"),
     ("GET", MODE, "mode.json"),
+    ("GET", RELEASE_NOTES, "release_note.json"),
     ("GET", SCHEDULE, "schedule.json"),
     ("GET", SOC_CONFIG, "config_soc.json"),
     ("GET", MAX_CHARGE, "config_max_charge_power.json"),

@@ -21,6 +21,7 @@ from .const import (
     AUTH_LINK,
     CONF_AUTH_TYPE,
     CONF_DEVICE_INTERVAL,
+    CONF_FIRMWARE,
     CONF_HUB_ID,
     CONF_STATUS_INTERVAL,
     DEFAULT_DEVICE_INTERVAL,
@@ -41,6 +42,10 @@ from .coordinator import (
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
+
+FIRMWARE_DOCS_URL = (
+    "https://github.com/Electrify-Everything-Now/homeassistant-plugin#firmware-updates"
+)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -117,6 +122,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
     entry.async_on_unload(
         status.async_add_listener(lambda: async_sync_devices(hass, entry, status.data))
     )
+    async_check_firmware_permission(hass, entry, status.data)
+    entry.async_on_unload(
+        status.async_add_listener(
+            lambda: async_check_firmware_permission(hass, entry, status.data)
+        )
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -126,6 +137,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
 async def async_unload_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
+    """Drop the suggestions made for an entry that is gone."""
+    ir.async_delete_issue(hass, DOMAIN, _firmware_permission_issue_id(entry))
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
@@ -168,6 +184,64 @@ def _async_remove_retired_entities(hass: HomeAssistant, entry: AnodeConfigEntry)
         translation_placeholders={
             "entities": "\n".join(f"- `{entity_id}`" for entity_id in sorted(removed))
         },
+    )
+
+
+def _firmware_permission_issue_id(entry: AnodeConfigEntry) -> str:
+    return f"firmware_permission_{entry.entry_id}"
+
+
+@callback
+def async_check_firmware_permission(
+    hass: HomeAssistant, entry: AnodeConfigEntry, status: HubStatus
+) -> None:
+    """Suggest linking again while an update waits that this entry may not install.
+
+    Only for linked entries: linking again adds the permission in a minute.
+    A key made by hand is often an installer's, which cannot link, so the
+    suggestion would be wrong there; its release notes say where to go instead.
+
+    Raised only while an update is waiting, so it asks for something the person
+    can use now. Ignoring it holds for later updates too, so an ignored issue is
+    kept, hidden, while nothing is waiting; linking again removes it for good.
+    """
+    issue_id = _firmware_permission_issue_id(entry)
+    eligible = entry.data.get(CONF_AUTH_TYPE) == AUTH_LINK and not entry.data.get(CONF_FIRMWARE)
+    waiting = [
+        (device_id, device.version, device.latest_version)
+        for device_id, device in (
+            (status.hub_id, status),
+            *status.batteries.items(),
+            *status.meters.items(),
+        )
+        if device.update_available
+    ]
+
+    if not eligible or not waiting:
+        issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+        if issue is not None and (not eligible or issue.dismissed_version is None):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+        return
+
+    registry = dr.async_get(hass)
+
+    def describe(device_id: str, installed: str | None, latest: str | None) -> str:
+        device = registry.async_get_device(identifiers={(DOMAIN, device_id)})
+        name = (device.name_by_user or device.name) if device else None
+        return f"- {name or device_id}: {installed or '?'} → {latest}"
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="firmware_permission",
+        translation_placeholders={
+            "hub": entry.title,
+            "devices": "\n".join(describe(*item) for item in waiting),
+        },
+        learn_more_url=FIRMWARE_DOCS_URL,
     )
 
 

@@ -349,6 +349,10 @@
     "retired_entities": {
       "title": "Anode override selects were replaced",
       "description": "This version of the Anode integration removed the Charge, Discharge, Idle and Match override selects:\n\n{entities}\n\nUse **Override mode** and **Override duration** on the hub device instead, or the **Anode: Set override** action. Update any dashboards and automations that used the old selects, then dismiss this message."
+    },
+    "firmware_permission": {
+      "title": "Allow Home Assistant to install Anode firmware",
+      "description": "Firmware updates are waiting for {hub}:\n\n{devices}\n\nHome Assistant can install these for you, but this hub was linked without permission to. To allow it, go to **Settings → Devices & services → Anode**, choose **Reconfigure** from the integration's menu, then **Link with your Anode account**, and approve the link. It allows Home Assistant to install the latest firmware from your own release train, and nothing more.\n\nUntil then, apply updates from the Anode app or your hub page in the Anode web dashboard. Ignore this message if you would rather keep doing that: it will not come back for later updates."
     }
   },
   "services": {

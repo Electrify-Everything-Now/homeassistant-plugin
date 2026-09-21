@@ -160,7 +160,10 @@ here as the hub works through them.
 
 Entries set up with an API key made by hand, or linked before this version,
 cannot install: the entity reports updates and its release notes say where to
-apply them. To add Install, choose **Reconfigure** and link again.
+apply them. To add Install, choose **Reconfigure** and link again. For a
+linked entry, Home Assistant suggests this under **Settings → Repairs** while
+an update is waiting; ignore the suggestion to stop it coming back for later
+updates.
 
 A device only gets a **Firmware** entity once Anode knows what that device
 could be running. One that has no published firmware for its hardware revision

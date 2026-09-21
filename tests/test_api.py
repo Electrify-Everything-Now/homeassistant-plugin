@@ -17,9 +17,11 @@ from custom_components.anode_battery.api import (
     AnodeConnectionError,
     AnodeForbiddenError,
     AnodeHubOfflineError,
+    AnodeHubRefusedError,
     AnodeNotFoundError,
     AnodeRateLimitError,
     AnodeResponseError,
+    AnodeUpdateInProgressError,
     MeterType,
     OperatingMode,
     PowerLimit,
@@ -37,6 +39,8 @@ from .common import (
     MAX_CHARGE,
     METERS,
     MODE,
+    OTA_LATEST,
+    OTA_PROGRESS,
     OVERRIDE,
     SCHEDULE,
     SET_CONFIG,
@@ -303,3 +307,117 @@ async def test_schedule_read_rejected(client: AnodeClient, cloud: AnodeCloud) ->
     cloud.respond("GET", SCHEDULE, json={"status": False, "info": "flash error"})
     with pytest.raises(AnodeCommandError):
         await client.get_schedule(HUB_ID)
+
+
+async def test_error_body_is_kept(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """An error carries its status and JSON body for callers that read them."""
+    cloud.respond(
+        "GET", STATUS, status=HTTPStatus.FORBIDDEN, json={"message": "no", "required": "device:read"}
+    )
+    with pytest.raises(AnodeForbiddenError) as err:
+        await client.get_hub_status(HUB_ID)
+    assert err.value.status == HTTPStatus.FORBIDDEN
+    assert err.value.body == {"message": "no", "required": "device:read"}
+
+
+async def test_update_firmware(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """One device is named, and what the server sent comes back."""
+    result = await client.update_firmware(HUB_ID, HUB_ID)
+    assert result.stream == "stable"
+    assert [(u.device_id, u.from_version, u.to_version) for u in result.updates] == [
+        (HUB_ID, "2.4.1", "2.5.0")
+    ]
+    (url, _), *_ = cloud.calls("PUT", OTA_LATEST)
+    assert dict(url.query) == {"id": HUB_ID}
+
+
+async def test_update_firmware_nothing_sent(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """Empty updates means the device was current and nothing was sent."""
+    cloud.respond(
+        "PUT",
+        OTA_LATEST,
+        json={"status": True, "info": "already up to date", "stream": "stable", "updates": []},
+    )
+    assert (await client.update_firmware(HUB_ID, "bat01")).updates == ()
+
+
+@pytest.mark.parametrize(
+    ("body", "device_id"),
+    [
+        ({"message": "update in progress", "id": "bat02"}, "bat02"),
+        # The hub's own refusal does not say which device is busy.
+        ({"message": "update in progress"}, None),
+        (None, None),
+    ],
+)
+async def test_update_firmware_in_progress(
+    client: AnodeClient, cloud: AnodeCloud, body: dict | None, device_id: str | None
+) -> None:
+    """409 names the device updating when the server knows it."""
+    cloud.respond("PUT", OTA_LATEST, status=HTTPStatus.CONFLICT, json=body)
+    with pytest.raises(AnodeUpdateInProgressError) as err:
+        await client.update_firmware(HUB_ID, "grid1")
+    assert err.value.device_id == device_id
+
+
+async def test_update_firmware_refused_by_hub(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """502 passes on what the hub said."""
+    cloud.respond(
+        "PUT",
+        OTA_LATEST,
+        status=HTTPStatus.BAD_GATEWAY,
+        json={"message": "hub refused the update", "info": "Unknown device ID"},
+    )
+    with pytest.raises(AnodeHubRefusedError) as err:
+        await client.update_firmware(HUB_ID, "grid1")
+    assert err.value.info == "Unknown device ID"
+    assert isinstance(err.value, AnodeCommandError)
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        (HTTPStatus.FORBIDDEN, AnodeForbiddenError),
+        (HTTPStatus.NOT_FOUND, AnodeNotFoundError),
+        (HTTPStatus.REQUEST_TIMEOUT, AnodeHubOfflineError),
+    ],
+)
+async def test_update_firmware_other_errors(
+    client: AnodeClient, cloud: AnodeCloud, status: HTTPStatus, error: type[Exception]
+) -> None:
+    """Everything else maps as for any other request."""
+    cloud.respond("PUT", OTA_LATEST, status=status, json={"message": "no"})
+    with pytest.raises(error):
+        await client.update_firmware(HUB_ID, "grid1")
+
+
+async def test_ota_progress(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """The percent is read, and clamped to 0-100."""
+    assert await client.get_ota_progress(HUB_ID) == 42
+    cloud.respond("GET", OTA_PROGRESS, json={"status": True, "percent": 140})
+    assert await client.get_ota_progress(HUB_ID) == 100
+    cloud.respond("GET", OTA_PROGRESS, json={"status": True, "info": "OTA in progress"})
+    assert await client.get_ota_progress(HUB_ID) is None
+
+
+async def test_ota_progress_quiet_hub(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """408 means no report arrived while the server waited, not an offline hub."""
+    cloud.respond("GET", OTA_PROGRESS, status=HTTPStatus.REQUEST_TIMEOUT, json={"message": "timeout"})
+    assert await client.get_ota_progress(HUB_ID) is None
+
+
+async def test_update_firmware_malformed(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """No updates list is an error; unreadable entries are dropped."""
+    cloud.respond("PUT", OTA_LATEST, json={"status": True})
+    with pytest.raises(AnodeResponseError):
+        await client.update_firmware(HUB_ID, "grid1")
+
+    cloud.respond(
+        "PUT",
+        OTA_LATEST,
+        json={"status": True, "updates": ["x", {"id": "a"}, {"id": "b", "from": "1", "to": "2"}]},
+    )
+    result = await client.update_firmware(HUB_ID, "b")
+    assert [update.device_id for update in result.updates] == ["b"]
+    assert result.stream is None
+

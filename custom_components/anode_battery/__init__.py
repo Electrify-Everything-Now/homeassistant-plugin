@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import (
     AnodeConfigEntry,
+    AnodeFirmwareCoordinator,
     AnodeModeCoordinator,
     AnodeRuntimeData,
     AnodeSettingsCoordinator,
@@ -95,6 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
         if isinstance(result, BaseException):
             raise result
 
+    firmware = AnodeFirmwareCoordinator(hass, entry, client, hub_id, status)
     entry.runtime_data = AnodeRuntimeData(
         client=client,
         hub_id=hub_id,
@@ -102,7 +104,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
         telemetry=telemetry,
         mode=mode,
         settings=settings,
+        firmware=firmware,
     )
+    # Picks up an update already running, started from the app or before a
+    # restart, and follows every one after.
+    firmware.async_status_updated()
+    entry.async_on_unload(status.async_add_listener(firmware.async_status_updated))
 
     # Devices must exist before entities link to them, so this listener is
     # registered before any platform adds its own.

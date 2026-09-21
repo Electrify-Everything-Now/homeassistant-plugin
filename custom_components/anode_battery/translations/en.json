@@ -71,7 +71,7 @@
       }
     },
     "progress": {
-      "wait_for_link": "Open the [Anode link page]({url}), check it shows code **{code}**, choose your hub and select **Allow**.\n\nYou will be asked to allow Home Assistant to see live readings and settings, and to change modes, schedules and power levels. This step finishes by itself once you approve. The code lasts 15 minutes."
+      "wait_for_link": "Open the [Anode link page]({url}), check it shows code **{code}**, choose your hub and select **Allow**.\n\nYou will be asked to allow Home Assistant to see live readings and settings, to change modes, schedules and power levels, and to install the latest firmware from your own release train. This step finishes by itself once you approve. The code lasts 15 minutes."
     },
     "error": {
       "cannot_connect": "Could not reach the Anode cloud. Check your internet connection and try again.",
@@ -328,6 +328,21 @@
     },
     "not_permitted": {
       "message": "Anode did not allow this key to make changes. Reconfigure the integration to link again, or use an API key with full access."
+    },
+    "update_in_progress": {
+      "message": "A firmware update is already running on {device}. The hub updates one device at a time, so try again once it finishes."
+    },
+    "update_in_progress_hub": {
+      "message": "A firmware update is already running on this hub. The hub updates one device at a time, so try again once it finishes."
+    },
+    "update_refused": {
+      "message": "The hub did not start the firmware update: {info}"
+    },
+    "update_not_needed": {
+      "message": "{device} is already running the latest firmware, so nothing was sent."
+    },
+    "update_device_offline": {
+      "message": "{device} is offline, so its firmware cannot be updated. Try again once it is back online."
     }
   },
   "issues": {

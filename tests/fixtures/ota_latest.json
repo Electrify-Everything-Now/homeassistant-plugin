@@ -1,0 +1,7 @@
+{
+  "status": true,
+  "info": "OTA command accepted",
+  "ids": ["ehxbt"],
+  "stream": "stable",
+  "updates": [{ "id": "ehxbt", "from": "2.4.1", "to": "2.5.0" }]
+}

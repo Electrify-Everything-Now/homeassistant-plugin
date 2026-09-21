@@ -54,4 +54,8 @@ async def async_get_config_entry_diagnostics(
         "telemetry": _coordinator(runtime.telemetry),
         "mode": _coordinator(runtime.mode),
         "settings": _coordinator(runtime.settings),
+        "firmware": {
+            **_coordinator(runtime.firmware),
+            "updating": runtime.firmware.updating(),
+        },
     }

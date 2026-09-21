@@ -15,20 +15,24 @@ from .exceptions import (
     AnodeError,
     AnodeForbiddenError,
     AnodeHubOfflineError,
+    AnodeHubRefusedError,
     AnodeLinkDeniedError,
     AnodeLinkExpiredError,
     AnodeLinkFailedError,
     AnodeNotFoundError,
     AnodeRateLimitError,
     AnodeResponseError,
+    AnodeUpdateInProgressError,
 )
 from .models import (
     BINDING_HUB,
     SCOPE_DEVICE_CONTROL,
+    SCOPE_DEVICE_FIRMWARE,
     SCOPE_DEVICE_READ,
     AccountHub,
     BatteryReading,
     DeviceMetadata,
+    FirmwareUpdateResult,
     HubStatus,
     LinkCode,
     LinkGrant,
@@ -44,6 +48,7 @@ from .models import (
     parse_batteries,
     parse_device_metadata,
     parse_meters,
+    parse_ota_progress,
     parse_power_limit,
     parse_schedule,
     parse_soc_limits,
@@ -69,12 +74,27 @@ def _hub(hub_id: str) -> str:
     return quote(hub_id, safe="")
 
 
+async def _error_body(response: aiohttp.ClientResponse) -> Any:
+    """The JSON an error response carried, or None; never raises."""
+    try:
+        return await response.json(content_type=None)
+    except (ValueError, aiohttp.ClientError):
+        return None
+
+
+def _body_str(body: Any, key: str) -> str | None:
+    value = body.get(key) if isinstance(body, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
 LINK_CLIENT_KIND = "home-assistant"
 
 #: What linking asks the account holder for: everything this integration reads
-#: is ``device:read``, and the overrides and limits it writes are
-#: ``device:control``. Nothing here reads history, so no ``telemetry:read``.
-LINK_SCOPES: Final = (SCOPE_DEVICE_READ, SCOPE_DEVICE_CONTROL)
+#: is ``device:read``, the overrides and limits it writes are
+#: ``device:control``, and installing firmware is ``device:firmware``, which
+#: only ever moves a device up to the latest image on the owner's own train.
+#: Nothing here reads history, so no ``telemetry:read``.
+LINK_SCOPES: Final = (SCOPE_DEVICE_READ, SCOPE_DEVICE_CONTROL, SCOPE_DEVICE_FIRMWARE)
 
 
 class AnodeClient:
@@ -119,11 +139,12 @@ class AnodeClient:
                     params=params,
                     json=json,
                 ) as response:
-                    if error := _STATUS_ERRORS.get(response.status):
-                        raise error(f"{method} {path} returned HTTP {response.status}")
                     if response.status >= 400:
-                        raise AnodeResponseError(
-                            f"{method} {path} returned HTTP {response.status}"
+                        error = _STATUS_ERRORS.get(response.status, AnodeResponseError)
+                        raise error(
+                            f"{method} {path} returned HTTP {response.status}",
+                            status=response.status,
+                            body=await _error_body(response),
                         )
                     try:
                         return await response.json(content_type=None)
@@ -226,6 +247,50 @@ class AnodeClient:
         except AnodeNotFoundError:
             return None
         return ReleaseNote.from_api(data)
+
+    async def update_firmware(self, hub_id: str, device_id: str) -> FirmwareUpdateResult:
+        """Move one device up to the latest firmware on the owner's train.
+
+        The server chooses the image, and sends nothing to a device that is
+        current, offline or already updating. Raises AnodeUpdateInProgressError
+        when any device on the hub is updating, since the hub takes one at a
+        time, and AnodeHubRefusedError when the hub declines for its own reason.
+        """
+        try:
+            data = await self._request(
+                "PUT", f"/device/ota/{_hub(hub_id)}/latest", params={"id": device_id}
+            )
+        except AnodeResponseError as err:
+            if err.status == HTTPStatus.CONFLICT:
+                raise AnodeUpdateInProgressError(
+                    "A firmware update is already running on the hub",
+                    device_id=_body_str(err.body, "id"),
+                    status=err.status,
+                    body=err.body,
+                ) from err
+            if err.status == HTTPStatus.BAD_GATEWAY:
+                info = _body_str(err.body, "info")
+                raise AnodeHubRefusedError(
+                    f"The hub refused the update: {info}" if info else "The hub refused the update",
+                    info=info,
+                    status=err.status,
+                    body=err.body,
+                ) from err
+            raise
+        return FirmwareUpdateResult.from_api(data)
+
+    async def get_ota_progress(self, hub_id: str) -> int | None:
+        """Wait briefly for the hub's next firmware progress report, as a percent.
+
+        The server holds the request until the hub reports, and answers 408
+        when it does not within a few seconds. Between reports that is ordinary,
+        not the hub being offline, so it returns None.
+        """
+        try:
+            data = await self._request("GET", f"/device/ota/{_hub(hub_id)}")
+        except AnodeHubOfflineError:
+            return None
+        return parse_ota_progress(data)
 
     async def get_batteries(self, hub_id: str) -> dict[str, BatteryReading]:
         """Return readings for every battery the hub is using, in one request."""

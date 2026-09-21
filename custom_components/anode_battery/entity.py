@@ -73,12 +73,12 @@ def async_setup_dynamic_entities(
         entry.async_on_unload(coordinator.async_add_listener(add_new))
 
 
-async def async_run_command(
-    hass: HomeAssistant, entry: AnodeConfigEntry, command: Awaitable[None]
-) -> None:
+async def async_run_command[T](
+    hass: HomeAssistant, entry: AnodeConfigEntry, command: Awaitable[T]
+) -> T:
     """Await a hub command, turning client errors into user-facing errors."""
     try:
-        await command
+        return await command
     except AnodeForbiddenError as err:
         # The key works but may not make changes, so re-authenticating with the
         # same access would not help.

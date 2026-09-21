@@ -37,6 +37,9 @@ from .const import (
     DOMAIN,
     MODE_POLL_INTERVAL,
     MODE_SETTLE_DELAY,
+    OTA_PENDING_TIMEOUT,
+    OTA_PROGRESS_INTERVAL,
+    OTA_STATUS_INTERVAL,
     SETTINGS_POLL_INTERVAL,
 )
 
@@ -55,6 +58,7 @@ class AnodeRuntimeData:
     telemetry: AnodeTelemetryCoordinator
     mode: AnodeModeCoordinator
     settings: AnodeSettingsCoordinator
+    firmware: AnodeFirmwareCoordinator
     # Set by the Override duration number, used by the Override mode select.
     override_duration_min: int = DEFAULT_OVERRIDE_DURATION_MIN
 
@@ -124,8 +128,12 @@ class AnodeStatusCoordinator(_AnodeCoordinator[HubStatus]):
             hass, entry, client, hub_id, name="status", update_interval=update_interval
         )
         self._metadata: dict[str, DeviceMetadata] = {}
+        #: When the read behind ``data`` began, so something Home Assistant did
+        #: can be told apart from a status read that started before it.
+        self.read_started: datetime | None = None
 
     async def _async_update_data(self) -> HubStatus:
+        started = dt_util.utcnow()
         status, metadata = await asyncio.gather(
             self.client.get_hub_status(self.hub_id),
             self.client.get_device_metadata(self.hub_id),
@@ -141,7 +149,113 @@ class AnodeStatusCoordinator(_AnodeCoordinator[HubStatus]):
             raise metadata
         else:
             self._metadata = metadata
+        self.read_started = started
         return status.with_metadata(self._metadata)
+
+
+def updating_devices(status: HubStatus) -> list[str]:
+    """The devices status reports a firmware update running on."""
+    devices = [status.hub_id] if status.ota_in_progress else []
+    devices.extend(
+        device.id
+        for device in (*status.batteries.values(), *status.meters.values())
+        if device.ota_in_progress
+    )
+    return devices
+
+
+class AnodeFirmwareCoordinator(_AnodeCoordinator[int | None]):
+    """Progress of a firmware update, read only while one runs.
+
+    The hub updates one device at a time and reports progress for itself as a
+    whole, so this holds one percent. It also holds the updates Home Assistant
+    has started that status has not shown yet, and the lock that keeps two from
+    being sent at once, since the hub refuses a second while one runs.
+
+    It polls only while something is updating, and meanwhile has status read
+    more often so the entities see the update finish.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: AnodeConfigEntry,
+        client: AnodeClient,
+        hub_id: str,
+        status: AnodeStatusCoordinator,
+    ) -> None:
+        super().__init__(hass, entry, client, hub_id, name="firmware", update_interval=None)
+        self._status = status
+        self._status_interval = status.update_interval
+        self._pending: dict[str, datetime] = {}
+        self.lock = asyncio.Lock()
+
+    def updating(self) -> list[str]:
+        """Every device updating, whether status shows it yet or not."""
+        now = dt_util.utcnow()
+        self._pending = {
+            device_id: started
+            for device_id, started in self._pending.items()
+            if now - started < OTA_PENDING_TIMEOUT
+        }
+        reported = updating_devices(self._status.data) if self._status.data else []
+        return [*reported, *(d for d in self._pending if d not in reported)]
+
+    def is_updating(self, device_id: str) -> bool:
+        """Whether a firmware update is running, or was just sent, for a device."""
+        return device_id in self.updating()
+
+    def progress(self, device_id: str) -> int | None:
+        """The percent for a device, when it is the only one updating."""
+        return self.data if self.updating() == [device_id] else None
+
+    @callback
+    def async_note_started(self, device_id: str) -> None:
+        """Show an update Home Assistant just sent as running, then confirm it."""
+        self._pending[device_id] = dt_util.utcnow()
+        self._async_sync()
+        self._status.async_update_listeners()
+        self.hass.async_create_task(self._status.async_request_refresh())
+
+    @callback
+    def async_status_updated(self) -> None:
+        """Let status take over from what was sent, and start or stop polling."""
+        if (read_started := self._status.read_started) is not None:
+            # A read begun after the update was sent is the hub's own answer.
+            # One begun before it cannot know yet, so the update stays pending.
+            self._pending = {
+                device_id: started
+                for device_id, started in self._pending.items()
+                if started >= read_started
+            }
+        self._async_sync()
+
+    @callback
+    def _async_sync(self) -> None:
+        if self.updating():
+            if self.update_interval is None:
+                self.update_interval = OTA_PROGRESS_INTERVAL
+                if self._status_interval is None or self._status_interval > OTA_STATUS_INTERVAL:
+                    self._status.update_interval = OTA_STATUS_INTERVAL
+                self.hass.async_create_task(self.async_request_refresh())
+        elif self.update_interval is not None:
+            self.update_interval = None
+            self._status.update_interval = self._status_interval
+            self.async_set_updated_data(None)
+
+    async def _async_update_data(self) -> int | None:
+        if not self.updating():
+            return None
+        try:
+            percent = await self.client.get_ota_progress(self.hub_id)
+        except AnodeAuthError as err:
+            self._raise_update_error("firmware progress", err)
+        except AnodeError as err:
+            # Progress is a nicety. Status says whether the update is running,
+            # so a missed report keeps the last percent rather than failing.
+            _LOGGER.debug("Could not read firmware progress for %s: %s", self.hub_id, err)
+            return self.data
+        return percent if percent is not None else self.data
 
 
 @dataclass(frozen=True, slots=True)

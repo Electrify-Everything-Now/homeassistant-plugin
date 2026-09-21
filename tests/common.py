@@ -41,6 +41,8 @@ SET_CONFIG = f"/device/config/{HUB_ID}"
 OVERRIDE = f"/device/{HUB_ID}/override"
 LINK_REQUEST = "/device-auth/request"
 LINK_TOKEN = "/device-auth/token"
+OTA_LATEST = f"/device/ota/{HUB_ID}/latest"
+OTA_PROGRESS = f"/device/ota/{HUB_ID}"
 
 DEFAULT_ROUTES: tuple[tuple[str, str, str], ...] = (
     ("GET", ACCOUNT, "account_devices.json"),
@@ -58,6 +60,8 @@ DEFAULT_ROUTES: tuple[tuple[str, str, str], ...] = (
     ("PUT", OVERRIDE, "override_ack.json"),
     ("POST", LINK_REQUEST, "link_request.json"),
     ("POST", LINK_TOKEN, "link_approved.json"),
+    ("PUT", OTA_LATEST, "ota_latest.json"),
+    ("GET", OTA_PROGRESS, "ota_progress.json"),
 )
 
 # Single-battery reads (?id=...). Only bat01's firmware reports BMS data.

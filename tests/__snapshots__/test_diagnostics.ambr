@@ -11,6 +11,14 @@
       }),
       'version': '1.2',
     }),
+    'firmware': dict({
+      'data': None,
+      'last_exception': None,
+      'last_update_success': True,
+      'update_interval': 'None',
+      'updating': list([
+      ]),
+    }),
     'mode': dict({
       'data': dict({
         'active_slot': None,

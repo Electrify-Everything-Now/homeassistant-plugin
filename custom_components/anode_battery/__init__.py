@@ -186,8 +186,8 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
         name: str,
         model: str,
         sw_version: str | None,
-        via_device: tuple[str, str] | None = None,
-    ) -> None:
+        via_device_id: str | None = None,
+    ) -> str:
         device = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, identifier)},
@@ -195,18 +195,22 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             model=model,
             name=name,
             serial_number=identifier,
-            via_device=via_device,
         )
         changes: dict[str, str] = {}
         if device.name != name:
             changes["name"] = name
         if sw_version and device.sw_version != sw_version:
             changes["sw_version"] = sw_version
+        # Linked here rather than on create: every supported release takes
+        # via_device_id on update, but only newer ones take it on create, and
+        # the via_device identifier older ones take there is deprecated.
+        if via_device_id and device.via_device_id != via_device_id:
+            changes["via_device_id"] = via_device_id
         if changes:
             registry.async_update_device(device.id, **changes)
+        return device.id
 
-    hub = (DOMAIN, status.hub_id)
-    upsert(
+    hub = upsert(
         status.hub_id,
         name=status.alias or f"Anode Hub {status.hub_id}",
         model="Hub",
@@ -218,7 +222,7 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             name=battery.alias or f"Anode Battery {battery.id}",
             model="Battery",
             sw_version=battery.version,
-            via_device=hub,
+            via_device_id=hub,
         )
     for meter in status.meters.values():
         upsert(
@@ -226,7 +230,7 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             name=meter.alias or f"Anode Meter {meter.id}",
             model="Meter",
             sw_version=meter.version,
-            via_device=hub,
+            via_device_id=hub,
         )
 
 

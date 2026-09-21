@@ -4,6 +4,6 @@
   "email": "owner@example.com",
   "deviceId": null,
   "hubId": "ehxbt",
-  "scopes": ["device:read", "device:control"],
+  "scopes": ["device:read", "device:control", "device:firmware"],
   "binding": "hub"
 }

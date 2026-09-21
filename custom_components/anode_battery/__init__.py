@@ -21,6 +21,7 @@ from .const import (
     AUTH_LINK,
     CONF_AUTH_TYPE,
     CONF_DEVICE_INTERVAL,
+    CONF_FIRMWARE,
     CONF_HUB_ID,
     CONF_STATUS_INTERVAL,
     DEFAULT_DEVICE_INTERVAL,
@@ -31,6 +32,7 @@ from .const import (
 )
 from .coordinator import (
     AnodeConfigEntry,
+    AnodeFirmwareCoordinator,
     AnodeModeCoordinator,
     AnodeRuntimeData,
     AnodeSettingsCoordinator,
@@ -40,6 +42,10 @@ from .coordinator import (
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
+
+FIRMWARE_DOCS_URL = (
+    "https://github.com/Electrify-Everything-Now/homeassistant-plugin#firmware-updates"
+)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -95,6 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
         if isinstance(result, BaseException):
             raise result
 
+    firmware = AnodeFirmwareCoordinator(hass, entry, client, hub_id, status)
     entry.runtime_data = AnodeRuntimeData(
         client=client,
         hub_id=hub_id,
@@ -102,13 +109,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
         telemetry=telemetry,
         mode=mode,
         settings=settings,
+        firmware=firmware,
     )
+    # Picks up an update already running, started from the app or before a
+    # restart, and follows every one after.
+    firmware.async_status_updated()
+    entry.async_on_unload(status.async_add_listener(firmware.async_status_updated))
 
     # Devices must exist before entities link to them, so this listener is
     # registered before any platform adds its own.
     async_sync_devices(hass, entry, status.data)
     entry.async_on_unload(
         status.async_add_listener(lambda: async_sync_devices(hass, entry, status.data))
+    )
+    async_check_firmware_permission(hass, entry, status.data)
+    entry.async_on_unload(
+        status.async_add_listener(
+            lambda: async_check_firmware_permission(hass, entry, status.data)
+        )
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -119,6 +137,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
 async def async_unload_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
+    """Drop the suggestions made for an entry that is gone."""
+    ir.async_delete_issue(hass, DOMAIN, _firmware_permission_issue_id(entry))
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
@@ -164,6 +187,64 @@ def _async_remove_retired_entities(hass: HomeAssistant, entry: AnodeConfigEntry)
     )
 
 
+def _firmware_permission_issue_id(entry: AnodeConfigEntry) -> str:
+    return f"firmware_permission_{entry.entry_id}"
+
+
+@callback
+def async_check_firmware_permission(
+    hass: HomeAssistant, entry: AnodeConfigEntry, status: HubStatus
+) -> None:
+    """Suggest linking again while an update waits that this entry may not install.
+
+    Only for linked entries: linking again adds the permission in a minute.
+    A key made by hand is often an installer's, which cannot link, so the
+    suggestion would be wrong there; its release notes say where to go instead.
+
+    Raised only while an update is waiting, so it asks for something the person
+    can use now. Ignoring it holds for later updates too, so an ignored issue is
+    kept, hidden, while nothing is waiting; linking again removes it for good.
+    """
+    issue_id = _firmware_permission_issue_id(entry)
+    eligible = entry.data.get(CONF_AUTH_TYPE) == AUTH_LINK and not entry.data.get(CONF_FIRMWARE)
+    waiting = [
+        (device_id, device.version, device.latest_version)
+        for device_id, device in (
+            (status.hub_id, status),
+            *status.batteries.items(),
+            *status.meters.items(),
+        )
+        if device.update_available
+    ]
+
+    if not eligible or not waiting:
+        issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+        if issue is not None and (not eligible or issue.dismissed_version is None):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+        return
+
+    registry = dr.async_get(hass)
+
+    def describe(device_id: str, installed: str | None, latest: str | None) -> str:
+        device = registry.async_get_device(identifiers={(DOMAIN, device_id)})
+        name = (device.name_by_user or device.name) if device else None
+        return f"- {name or device_id}: {installed or '?'} → {latest}"
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="firmware_permission",
+        translation_placeholders={
+            "hub": entry.title,
+            "devices": "\n".join(describe(*item) for item in waiting),
+        },
+        learn_more_url=FIRMWARE_DOCS_URL,
+    )
+
+
 @callback
 def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: HubStatus) -> None:
     """Create or update the hub, battery and meter devices.
@@ -179,8 +260,8 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
         name: str,
         model: str,
         sw_version: str | None,
-        via_device: tuple[str, str] | None = None,
-    ) -> None:
+        via_device_id: str | None = None,
+    ) -> str:
         device = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, identifier)},
@@ -188,18 +269,22 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             model=model,
             name=name,
             serial_number=identifier,
-            via_device=via_device,
         )
         changes: dict[str, str] = {}
         if device.name != name:
             changes["name"] = name
         if sw_version and device.sw_version != sw_version:
             changes["sw_version"] = sw_version
+        # Linked here rather than on create: every supported release takes
+        # via_device_id on update, but only newer ones take it on create, and
+        # the via_device identifier older ones take there is deprecated.
+        if via_device_id and device.via_device_id != via_device_id:
+            changes["via_device_id"] = via_device_id
         if changes:
             registry.async_update_device(device.id, **changes)
+        return device.id
 
-    hub = (DOMAIN, status.hub_id)
-    upsert(
+    hub = upsert(
         status.hub_id,
         name=status.alias or f"Anode Hub {status.hub_id}",
         model="Hub",
@@ -211,7 +296,7 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             name=battery.alias or f"Anode Battery {battery.id}",
             model="Battery",
             sw_version=battery.version,
-            via_device=hub,
+            via_device_id=hub,
         )
     for meter in status.meters.values():
         upsert(
@@ -219,7 +304,7 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             name=meter.alias or f"Anode Meter {meter.id}",
             model="Meter",
             sw_version=meter.version,
-            via_device=hub,
+            via_device_id=hub,
         )
 
 

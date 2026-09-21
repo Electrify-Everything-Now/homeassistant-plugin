@@ -316,6 +316,54 @@ class ReleaseNote:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FirmwareUpgrade:
+    """One device an update-to-latest sent an image to."""
+
+    device_id: str
+    from_version: str
+    to_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class FirmwareUpdateResult:
+    """Parsed ``PUT /device/ota/{hub}/latest``.
+
+    The server picks each image from the owner's train, so the request names no
+    image and ``updates`` is the only record of what was sent. Empty means every
+    device asked about was already current, and nothing was sent.
+    """
+
+    stream: str | None
+    updates: tuple[FirmwareUpgrade, ...]
+
+    @classmethod
+    def from_api(cls, data: Any) -> FirmwareUpdateResult:
+        """Parse an update-to-latest response."""
+        data = require_dict(data, "firmware update")
+        updates = data.get("updates")
+        if not isinstance(updates, list):
+            raise AnodeResponseError("Firmware update response is missing its updates")
+        parsed = []
+        for item in updates:
+            if not isinstance(item, dict):
+                continue
+            device_id, old, new = (_str(item.get(key)) for key in ("id", "from", "to"))
+            if device_id and old and new:
+                parsed.append(FirmwareUpgrade(device_id, old, new))
+        return cls(stream=_str(data.get("stream")), updates=tuple(parsed))
+
+
+def parse_ota_progress(data: Any) -> int | None:
+    """Return the percent from ``GET /device/ota/{hub}``, if it has one.
+
+    The hub reports on whichever device it is flashing and does not say which:
+    it only ever flashes one at a time, so the caller knows.
+    """
+    percent = _int(require_dict(data, "firmware progress").get("percent"))
+    return max(0, min(100, percent)) if percent is not None else None
+
+
 def _unit_values(data: dict[str, Any], key: str) -> tuple[list[float], str] | None:
     """Read a ``{"values": [...], "unit": "..."}`` field.
 
@@ -678,11 +726,16 @@ class LinkCode:
         )
 
 
-# What a key may reach. The full table is the Anode API's, but these are the
-# only two this integration ever asks for: everything it reads is device:read,
-# and the overrides and limits it writes are device:control.
+# What a key may reach. The full table is the Anode API's. Everything this
+# integration reads is device:read, the overrides and limits it writes are
+# device:control, and installing firmware is device:firmware: moving devices up
+# to the latest image on the owner's own train, and nothing else.
 SCOPE_DEVICE_READ: Final = "device:read"
 SCOPE_DEVICE_CONTROL: Final = "device:control"
+SCOPE_DEVICE_FIRMWARE: Final = "device:firmware"
+# Never asked for, but a key holding it may also install firmware: it may write
+# any image, so the latest one is a slice of that.
+SCOPE_DEVICE_SERVICE: Final = "device:service"
 
 # Scopes reach one hub rather than everything the approving account reaches.
 BINDING_HUB: Final = "hub"
@@ -703,6 +756,11 @@ class LinkGrant:
     def read_only(self) -> bool:
         """Whether the key may only read, so no controls are offered."""
         return SCOPE_DEVICE_CONTROL not in self.scopes
+
+    @property
+    def can_update_firmware(self) -> bool:
+        """Whether the key may install the latest firmware."""
+        return bool({SCOPE_DEVICE_FIRMWARE, SCOPE_DEVICE_SERVICE} & self.scopes)
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> LinkGrant:

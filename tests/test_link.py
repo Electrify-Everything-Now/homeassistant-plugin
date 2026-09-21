@@ -20,6 +20,7 @@ from custom_components.anode_battery.api import LINK_CLIENT_KIND
 from custom_components.anode_battery.const import (
     AUTH_LINK,
     CONF_AUTH_TYPE,
+    CONF_FIRMWARE,
     CONF_HUB_ID,
     CONF_READ_ONLY,
     DOMAIN,
@@ -99,6 +100,7 @@ async def test_link_creates_entry(hass: HomeAssistant, cloud: AnodeCloud) -> Non
         CONF_API_KEY: LINKED_KEY,
         CONF_HUB_ID: HUB_ID,
         CONF_READ_ONLY: False,
+        CONF_FIRMWARE: True,
     }
     assert result["result"].unique_id == HUB_ID
 
@@ -107,14 +109,14 @@ async def test_link_creates_entry(hass: HomeAssistant, cloud: AnodeCloud) -> Non
 async def test_link_asks_for_the_scopes_it_needs(
     hass: HomeAssistant, cloud: AnodeCloud
 ) -> None:
-    """The request names this client and asks for one hub's reads and control."""
+    """The request names this client and asks for one hub's reads, control and firmware."""
     await start_link(hass)
 
     (_, body), *rest = cloud.calls("POST", LINK_REQUEST)
     assert not rest
     assert body["clientKind"] == LINK_CLIENT_KIND
     assert body["clientName"].startswith("Home Assistant")
-    assert sorted(body["scopes"]) == ["device:control", "device:read"]
+    assert sorted(body["scopes"]) == ["device:control", "device:firmware", "device:read"]
     assert body["binding"] == "hub"
 
 
@@ -215,6 +217,27 @@ async def test_link_without_control_is_read_only(
     result = await start_link(hass)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_READ_ONLY] is True
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+@pytest.mark.parametrize(
+    ("scopes", "firmware"),
+    [
+        (["device:read", "device:control"], False),
+        (["device:read", "device:control", "device:firmware"], True),
+        # A key that may write any image may write the latest one.
+        (["device:read", "device:control", "device:service"], True),
+    ],
+)
+async def test_link_records_whether_firmware_may_be_installed(
+    hass: HomeAssistant, cloud: AnodeCloud, scopes: list[str], firmware: bool
+) -> None:
+    """Install is offered only where the grant allows it."""
+    cloud.respond("POST", LINK_TOKEN, json=approved(scopes=scopes))
+
+    result = await start_link(hass)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_FIRMWARE] is firmware
 
 
 async def test_link_without_read_is_refused(hass: HomeAssistant, cloud: AnodeCloud) -> None:
@@ -458,6 +481,7 @@ async def test_reauth_by_linking(
         CONF_API_KEY: LINKED_KEY,
         CONF_HUB_ID: HUB_ID,
         CONF_READ_ONLY: False,
+        CONF_FIRMWARE: True,
     }
 
 

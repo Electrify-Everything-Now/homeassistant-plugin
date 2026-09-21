@@ -27,7 +27,7 @@ In Home Assistant, go to **Settings → Devices & services → Add integration**
 | Reaches | The one hub you choose when you approve it | Whatever the account reaches |
 | Use it when | You have a hub on your own account | The account has no hub of its own, such as an installer account |
 
-Both give the same sensors and controls. Linking is the easier of the two and hands out the narrower key, so it is the one to prefer.
+Both give the same sensors and controls. Only linking lets Home Assistant install firmware, since a key made by hand does not say what it may do (see [Firmware updates](#firmware-updates)). Linking is also the easier of the two and hands out the narrower key, so it is the one to prefer.
 
 ### Link with your Anode account
 
@@ -94,7 +94,7 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Grid import energy today, Grid export energy today, House energy today, Battery charge energy today, Battery discharge energy today | Energy since midnight. See [Energy today](#energy-today) |
 | Battery energy capacity, Battery energy remaining, Average state of charge | Totals and capacity-weighted average across batteries |
 | Firmware version, Uptime | Diagnostic |
-| Firmware | Whether newer firmware is available for the device. Home Assistant reports it but cannot install it — see [Firmware updates](#firmware-updates) |
+| Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
 
 ### Battery
 
@@ -115,7 +115,7 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Minimum state of charge, Maximum state of charge | The battery's operating window |
 | Online | Whether the hub reports the battery as connected |
 | Nominal voltage, Firmware version, Uptime | Diagnostic |
-| Firmware | Whether newer firmware is available for the device. Home Assistant reports it but cannot install it — see [Firmware updates](#firmware-updates) |
+| Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
 
 ### Meter
 
@@ -127,7 +127,7 @@ Batteries and meters paired later appear automatically. A device the hub no long
 | Voltage, Current, Power factor | Disabled by default. Enable them from the entity's settings |
 | Online | Whether the hub reports the meter as connected |
 | Meter type, Parent meter, Firmware version, Uptime | Diagnostic |
-| Firmware | Whether newer firmware is available for the device. Home Assistant reports it but cannot install it — see [Firmware updates](#firmware-updates) |
+| Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
 
 A meter is treated as a grid meter when its type is `PRIMARY` or its purpose in the Anode app is **Primary**, and as generation when its type is `EXT_INVERTER` or its purpose is **Solar**.
 
@@ -136,12 +136,34 @@ A meter is treated as a grid meter when its type is `PRIMARY` or its purpose in 
 Each hub, battery and meter gets a **Firmware** entity that turns on when newer
 firmware is available for it, and shows the release notes for that version.
 
-Home Assistant cannot install Anode firmware. Applying an update takes the
-device through a reboot and needs a level of account access this integration
-deliberately does not ask for, so updates are applied from the Anode app or
-from your hub page in the Anode web dashboard. The entity clears by itself once
-the device comes back on the new version, and shows as installing while an
-update started elsewhere is running.
+Where the integration was set up by linking, it may also install them. The
+entity then has an **Install** button and is listed under **Settings → Updates**
+with everything else that needs updating. Install moves that one device up to
+the latest firmware on your own release train, the same as **Update all** in
+the Anode app: Home Assistant never chooses the firmware, and cannot move a
+device to an older version or to another train. The permission linking asks for
+allows exactly that and nothing more.
+
+An update shows as installing, with its progress, until the device comes back
+on the new version. The device restarts to finish, and the hub stops answering
+for about a minute when it is the one updating; the entity stays available
+through that.
+
+The hub updates one device at a time. While one is updating, installing another
+is refused with a message naming the device that is busy, so try again once it
+finishes. Updates started from the Anode app show here as installing too.
+
+Home Assistant installs one device at a time. To update every device at once,
+use **Update all** on your hub page in the Anode web dashboard at
+https://anode.energy/dashboard/user/overview; the devices show as installing
+here as the hub works through them.
+
+Entries set up with an API key made by hand, or linked before this version,
+cannot install: the entity reports updates and its release notes say where to
+apply them. To add Install, choose **Reconfigure** and link again. For a
+linked entry, Home Assistant suggests this under **Settings → Repairs** while
+an update is waiting; ignore the suggestion to stop it coming back for later
+updates.
 
 A device only gets a **Firmware** entity once Anode knows what that device
 could be running. One that has no published firmware for its hardware revision
@@ -295,10 +317,16 @@ pip install -r requirements_test.txt
 pytest --cov=custom_components.anode_battery --cov-report=term-missing
 ```
 
+pip can spend a long time resolving Home Assistant's dependencies. [uv](https://docs.astral.sh/uv/) is much faster; it needs `--prerelease=allow` because Home Assistant pins a beta of `aiohasupervisor`:
+
+```bash
+uv pip install --prerelease=allow -r requirements_test.txt
+```
+
 | Path | Contents |
 | --- | --- |
 | `custom_components/anode_battery/api/` | Async client and typed models for the Anode cloud API. No Home Assistant imports, so it can be published to PyPI as its own package |
-| `coordinator.py` | Four coordinators: status, telemetry, mode and schedule, settings |
+| `coordinator.py` | Five coordinators: status, telemetry, mode and schedule, settings, and firmware update progress |
 | `entity.py` | Base entity, dynamic device handling, command error handling |
 | `sensor.py`, `binary_sensor.py`, `number.py`, `select.py`, `button.py` | Entity descriptions and platforms |
 | `tests/fixtures/` | API responses in the shape the Anode backend returns them |
@@ -321,6 +349,9 @@ Paths are relative to `https://api.anode.energy/api` (`API_BASE_URL` in `api/cli
 | GET | `/device/config/{hub}/{key}` | `socConfig`, `maxChargePower`, `maxDischargePower` |
 | PUT | `/device/config/{hub}` | Changing those settings |
 | PUT | `/device/{hub}/override` | Starting and cancelling overrides |
+| GET | `/device/release-notes` | Release notes for the firmware on offer |
+| PUT | `/device/ota/{hub}/latest` | Installing the latest firmware on one device |
+| GET | `/device/ota/{hub}` | Progress of a running firmware update |
 
 ## License
 

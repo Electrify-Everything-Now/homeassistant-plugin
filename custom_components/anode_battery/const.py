@@ -15,6 +15,9 @@ AUTH_API_KEY: Final = "api_key"
 AUTH_LINK: Final = "link"
 # Set for linked entries whose key may only read.
 CONF_READ_ONLY: Final = "read_only"
+# Set for linked entries whose key may install firmware. API keys made by hand
+# never set it: nothing tells us what such a key may do.
+CONF_FIRMWARE: Final = "firmware"
 # Lower bound on how often to poll for an approved link, in seconds.
 LINK_MIN_POLL_INTERVAL: Final = 1
 
@@ -36,6 +39,15 @@ BMS_UNSUPPORTED_RECHECK: Final = timedelta(hours=1)
 # Wait this long after a schedule boundary or an override command before
 # re-reading the mode, so we see the mode the hub switched to.
 MODE_SETTLE_DELAY: Final = timedelta(seconds=5)
+
+# While a firmware update runs: how often to ask for progress (each request
+# itself waits up to a few seconds for the hub to report), and how often to
+# re-read status to see it finish.
+OTA_PROGRESS_INTERVAL: Final = timedelta(seconds=2)
+OTA_STATUS_INTERVAL: Final = timedelta(seconds=20)
+# How long an update Home Assistant started shows as installing before status
+# reports it. The hub starts it at once, so this only covers the status read.
+OTA_PENDING_TIMEOUT: Final = timedelta(minutes=2)
 
 DEFAULT_OVERRIDE_DURATION_MIN: Final = 60
 MAX_OVERRIDE_DURATION_MIN: Final = 7 * 24 * 60

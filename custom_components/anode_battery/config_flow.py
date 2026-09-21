@@ -51,6 +51,7 @@ from .const import (
     AUTH_LINK,
     CONF_AUTH_TYPE,
     CONF_DEVICE_INTERVAL,
+    CONF_FIRMWARE,
     CONF_HUB_ID,
     CONF_READ_ONLY,
     CONF_STATUS_INTERVAL,
@@ -410,6 +411,7 @@ class AnodeConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_API_KEY: grant.api_key,
             CONF_HUB_ID: hub_id,
             CONF_READ_ONLY: grant.read_only,
+            CONF_FIRMWARE: grant.can_update_firmware,
         }
         await self.async_set_unique_id(hub_id)
 

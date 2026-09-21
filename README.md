@@ -153,6 +153,11 @@ The hub updates one device at a time. While one is updating, installing another
 is refused with a message naming the device that is busy, so try again once it
 finishes. Updates started from the Anode app show here as installing too.
 
+Home Assistant installs one device at a time. To update every device at once,
+use **Update all** on your hub page in the Anode web dashboard at
+https://anode.energy/dashboard/user/overview; the devices show as installing
+here as the hub works through them.
+
 Entries set up with an API key made by hand, or linked before this version,
 cannot install: the entity reports updates and its release notes say where to
 apply them. To add Install, choose **Reconfigure** and link again.

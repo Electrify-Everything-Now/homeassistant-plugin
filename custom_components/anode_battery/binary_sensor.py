@@ -29,7 +29,7 @@ async def async_setup_entry(
         status = runtime.status.data
         yield AnodeHubOnlineSensor(runtime.status)
         yield AnodeOverrideActiveSensor(runtime.mode)
-        for device_id in (*status.batteries, *status.meters):
+        for device_id in (*status.batteries, *status.meters, *status.repeaters):
             yield AnodeSubDeviceOnlineSensor(runtime.status, device_id)
 
     async_setup_dynamic_entities(entry, async_add_entities, build)
@@ -59,7 +59,7 @@ class AnodeHubOnlineSensor(AnodeEntity[AnodeStatusCoordinator], BinarySensorEnti
 
 
 class AnodeSubDeviceOnlineSensor(AnodeEntity[AnodeStatusCoordinator], BinarySensorEntity):
-    """Whether the hub currently reports a battery or meter as connected."""
+    """Whether the hub currently reports a battery, meter or repeater as connected."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_translation_key = "online"
@@ -70,7 +70,7 @@ class AnodeSubDeviceOnlineSensor(AnodeEntity[AnodeStatusCoordinator], BinarySens
     @property
     def is_on(self) -> bool:
         data = self.coordinator.data
-        device = data.batteries.get(self._device_id) or data.meters.get(self._device_id)
+        device = data.sub_device(self._device_id)
         # Older firmware has no online flag; being listed means connected.
         return device is not None and device.online is not False
 

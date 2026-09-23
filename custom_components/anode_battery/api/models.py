@@ -158,7 +158,7 @@ def parse_device_metadata(data: Any) -> dict[str, DeviceMetadata]:
 
 @dataclass(frozen=True, slots=True)
 class SubDevice:
-    """A battery or meter as listed in hub status."""
+    """A battery, meter or repeater as listed in hub status."""
 
     id: str
     version: str | None = None
@@ -176,7 +176,7 @@ class SubDevice:
 
     @classmethod
     def from_api(cls, data: Any) -> SubDevice:
-        """Parse one entry of the status ``battery``/``meter`` arrays."""
+        """Parse one entry of the status ``battery``/``meter``/``repeater`` arrays."""
         data = require_dict(data, "status device")
         if not (device_id := _str(data.get("id"))):
             raise AnodeResponseError("Status device entry is missing an id")
@@ -215,6 +215,8 @@ class HubStatus:
     uptime_ms: int | None
     batteries: dict[str, SubDevice]
     meters: dict[str, SubDevice]
+    #: Radio repeaters. They carry no readings, only what status reports.
+    repeaters: dict[str, SubDevice]
     alias: str | None = None
     #: The newest image the account's firmware train holds for this hardware.
     #:
@@ -243,6 +245,7 @@ class HubStatus:
             uptime_ms=_int(hub.get("uptime")),
             batteries=_parse_sub_devices(data.get("battery")),
             meters=_parse_sub_devices(data.get("meter")),
+            repeaters=_parse_sub_devices(data.get("repeater")),
             latest_version=_str(hub.get("latestVersion")),
             update_available=hub.get("updateAvailable") is True,
             ota_in_progress=hub.get("otaInProgress") is True,
@@ -263,6 +266,20 @@ class HubStatus:
             alias=hub_meta.alias if hub_meta else self.alias,
             batteries={k: apply(v) for k, v in self.batteries.items()},
             meters={k: apply(v) for k, v in self.meters.items()},
+            repeaters={k: apply(v) for k, v in self.repeaters.items()},
+        )
+
+    @property
+    def sub_devices(self) -> list[SubDevice]:
+        """Every battery, meter and repeater paired to the hub."""
+        return [*self.batteries.values(), *self.meters.values(), *self.repeaters.values()]
+
+    def sub_device(self, device_id: str) -> SubDevice | None:
+        """A battery, meter or repeater by id."""
+        return (
+            self.batteries.get(device_id)
+            or self.meters.get(device_id)
+            or self.repeaters.get(device_id)
         )
 
     @property

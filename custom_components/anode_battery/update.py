@@ -1,6 +1,6 @@
 """Update platform for the Anode integration.
 
-Every hub, battery and meter gets an entity saying what it runs and what it
+Every hub, battery, meter and repeater gets an entity saying what it runs and what it
 could be running. Where the key may install firmware, the entity can also
 install it, and is then listed under Settings → Updates: Home Assistant only
 lists update entities that can install.
@@ -107,6 +107,9 @@ async def async_setup_entry(
         for device_id, meter in status.meters.items():
             if meter.latest_version is not None:
                 yield entity(device_id, ProductCode.METER)
+        for device_id, repeater in status.repeaters.items():
+            if repeater.latest_version is not None:
+                yield entity(device_id, ProductCode.REPEATER)
 
     async_setup_dynamic_entities(entry, async_add_entities, build)
 
@@ -115,14 +118,14 @@ def _firmware_state(status: HubStatus, device_id: str) -> FirmwareState | None:
     """The firmware fields for one device, hub or sub-device."""
     if device_id == status.hub_id:
         return status
-    return status.batteries.get(device_id) or status.meters.get(device_id)
+    return status.sub_device(device_id)
 
 
 def _device_online(status: HubStatus, device_id: str) -> bool:
     """Whether a device can be reached; unknown counts as reachable."""
     if device_id == status.hub_id:
         return status.online
-    device = status.batteries.get(device_id) or status.meters.get(device_id)
+    device = status.sub_device(device_id)
     return device is None or device.online is not False
 
 
@@ -141,7 +144,7 @@ def _release_notes_body(note: ReleaseNote | None, footer: str | None) -> str | N
 
 
 class AnodeUpdateEntity(AnodeEntity[AnodeStatusCoordinator], UpdateEntity):
-    """Firmware available for one hub, battery or meter."""
+    """Firmware available for one hub, battery, meter or repeater."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_translation_key = "firmware"

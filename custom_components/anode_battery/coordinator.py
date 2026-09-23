@@ -114,7 +114,7 @@ class _AnodeCoordinator[DataT](DataUpdateCoordinator[DataT]):
 
 
 class AnodeStatusCoordinator(_AnodeCoordinator[HubStatus]):
-    """Hub status: which batteries and meters exist, firmware, aliases."""
+    """Hub status: which batteries, meters and repeaters exist, firmware, aliases."""
 
     def __init__(
         self,
@@ -158,7 +158,7 @@ def updating_devices(status: HubStatus) -> list[str]:
     devices = [status.hub_id] if status.ota_in_progress else []
     devices.extend(
         device.id
-        for device in (*status.batteries.values(), *status.meters.values())
+        for device in status.sub_devices
         if device.ota_in_progress
     )
     return devices

@@ -56,7 +56,7 @@ Open **Settings → Devices & services → Anode → Configure**.
 
 | Option | Default | Controls |
 | --- | --- | --- |
-| Device list and firmware | 120 s | Which batteries and meters are paired, firmware versions, and names from the Anode app |
+| Device list and firmware | 120 s | Which batteries, meters and repeaters are paired, firmware versions, and names from the Anode app |
 | Power and energy readings | 30 s | Power, state of charge and energy counters |
 
 Both have a minimum of 10 seconds. Each read is relayed from the Anode cloud to the hub over the internet. The mode and schedule are read every 5 minutes and just after each scheduled change. Battery limits are read every 10 minutes.
@@ -71,9 +71,9 @@ Linking again issues a new key and leaves the old one in place, so delete the on
 
 ## Devices and entities
 
-The integration creates a device for the hub and for each battery and meter. Device names come from the Anode app and update when you rename a device there; a name you set in Home Assistant takes precedence.
+The integration creates a device for the hub and for each battery, meter and repeater. Device names come from the Anode app and update when you rename a device there; a name you set in Home Assistant takes precedence.
 
-Batteries and meters paired later appear automatically. A device the hub no longer reports can be deleted from its device page.
+Batteries, meters and repeaters paired later appear automatically. A device the hub no longer reports can be deleted from its device page.
 
 ### Hub
 
@@ -131,9 +131,19 @@ Batteries and meters paired later appear automatically. A device the hub no long
 
 A meter is treated as a grid meter when its type is `PRIMARY` or its purpose in the Anode app is **Primary**, and as generation when its type is `EXT_INVERTER` or its purpose is **Solar**.
 
+### Repeater
+
+Repeaters take no readings, so they have only status entities. When a battery or meter goes offline, check whether its repeater did too.
+
+| Entity | Description |
+| --- | --- |
+| Online | Whether the hub reports the repeater as connected |
+| Firmware version, Uptime | Diagnostic |
+| Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
+
 ## Firmware updates
 
-Each hub, battery and meter gets a **Firmware** entity that turns on when newer
+Each hub, battery, meter and repeater gets a **Firmware** entity that turns on when newer
 firmware is available for it, and shows the release notes for that version.
 
 Where the integration was set up by linking, it may also install them. The

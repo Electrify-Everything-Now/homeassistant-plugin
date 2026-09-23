@@ -152,7 +152,7 @@ async def test_older_api_creates_no_update_entities(
     status = load_fixture("status.json")
     status["hub"].pop("latestVersion")
     status["hub"].pop("updateAvailable")
-    for device in (*status["battery"], *status["meter"]):
+    for device in (*status["battery"], *status["meter"], *status["repeater"]):
         device.pop("latestVersion", None)
         device.pop("updateAvailable", None)
     cloud.respond("GET", STATUS, json=status)
@@ -194,6 +194,25 @@ async def test_release_notes(
 
     sent = cloud.calls("GET", RELEASE_NOTES)
     assert dict(sent[-1][0].query) == {"version": "2.5.0", "productCode": "1"}
+
+
+async def test_repeater_release_notes(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    hass_ws_client: WebSocketGenerator,
+    cloud: AnodeCloud,
+) -> None:
+    """A repeater's notes are asked for under the repeater product code."""
+    status = load_fixture("status.json")
+    status["repeater"][0]["latestVersion"] = "v0.3.0"
+    status["repeater"][0]["updateAvailable"] = True
+    cloud.respond("GET", STATUS, json=status)
+    await refresh(hass, init_integration.runtime_data.status)
+    assert state(hass, "update", "rep01_firmware").state == STATE_ON
+
+    await _release_notes(hass, hass_ws_client, "rep01_firmware")
+    sent = cloud.calls("GET", RELEASE_NOTES)
+    assert dict(sent[-1][0].query) == {"version": "v0.3.0", "productCode": "4"}
 
 
 async def test_release_notes_are_cached_per_version(

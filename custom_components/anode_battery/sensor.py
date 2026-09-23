@@ -428,6 +428,11 @@ METER_SENSORS: tuple[AnodeMeterSensorDescription, ...] = (
     ),
 )
 
+REPEATER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
+    _FIRMWARE_VERSION,
+    _SUB_DEVICE_UPTIME,
+)
+
 METER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
     AnodeSubDeviceSensorDescription(
         key="type",
@@ -853,6 +858,10 @@ async def async_setup_entry(
             for description in METER_STATUS_SENSORS:
                 if description.exists_fn(meter):
                     yield AnodeSubDeviceSensor(runtime.status, meter.id, description)
+        for repeater in status.repeaters.values():
+            for description in REPEATER_STATUS_SENSORS:
+                if description.exists_fn(repeater):
+                    yield AnodeSubDeviceSensor(runtime.status, repeater.id, description)
 
     async_setup_dynamic_entities(entry, async_add_entities, build)
 
@@ -943,7 +952,7 @@ class AnodeModeSensor(AnodeEntity[AnodeModeCoordinator], SensorEntity):
 
 
 class AnodeSubDeviceSensor(AnodeEntity[AnodeStatusCoordinator], SensorEntity):
-    """Battery or meter sensor read from hub status."""
+    """Battery, meter or repeater sensor read from hub status."""
 
     entity_description: AnodeSubDeviceSensorDescription
 
@@ -957,8 +966,7 @@ class AnodeSubDeviceSensor(AnodeEntity[AnodeStatusCoordinator], SensorEntity):
         self.entity_description = description
 
     def _device(self) -> SubDevice | None:
-        data = self.coordinator.data
-        return data.batteries.get(self._device_id) or data.meters.get(self._device_id)
+        return self.coordinator.data.sub_device(self._device_id)
 
     @property
     def available(self) -> bool:

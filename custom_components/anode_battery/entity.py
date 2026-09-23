@@ -29,7 +29,7 @@ def device_info(device_id: str) -> DeviceInfo:
 
 
 class AnodeEntity[CoordinatorT: DataUpdateCoordinator](CoordinatorEntity[CoordinatorT]):
-    """An entity belonging to one hub, battery or meter.
+    """An entity belonging to one hub, battery, meter or repeater.
 
     Unique ids are ``<device id>_<key>``, matching every earlier release so
     entity ids and statistics carry over.
@@ -55,7 +55,7 @@ def async_setup_dynamic_entities(
 
     ``build`` yields every entity that should exist for the current data;
     entities already added are skipped. It re-runs when hub status changes
-    (a battery or meter is paired) and when any extra coordinator updates.
+    (a battery, meter or repeater is paired) and when any extra coordinator updates.
     """
     added: set[str] = set()
 

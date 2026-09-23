@@ -72,6 +72,11 @@ async def test_hub_status_and_metadata(client: AnodeClient) -> None:
     assert set(status.batteries) == {"bat01", "bat02"}
     assert status.meters["ev001"].parent_meter == "grid1"
     assert status.meters["grid1"].meter_type is MeterType.PRIMARY
+    assert status.repeaters["rep01"].version == "v0.2.0"
+    assert status.sub_device("rep01") is status.repeaters["rep01"]
+    assert [d.id for d in status.sub_devices] == [
+        "bat01", "bat02", "grid1", "solar1", "ev001", "rep01"
+    ]
 
     status = status.with_metadata(await client.get_device_metadata(HUB_ID))
     assert status.alias == "Home hub"

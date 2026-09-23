@@ -51,5 +51,15 @@
       "parentMeter": "grid1",
       "online": true
     }
+  ],
+  "repeater": [
+    {
+      "id": "rep01",
+      "online": true,
+      "version": "v0.2.0",
+      "uptime": 151489674,
+      "latestVersion": "v0.2.0",
+      "updateAvailable": false
+    }
   ]
 }

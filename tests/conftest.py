@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
+from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.const import CONF_API_KEY, CONF_EMAIL
 from homeassistant.core import HomeAssistant
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.syrupy import HomeAssistantSnapshotExtension
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.anode_battery.const import CONF_HUB_ID, DOMAIN
@@ -20,6 +22,17 @@ from .common import API_KEY, EMAIL, HUB_ID, AnodeCloud
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Enable custom integrations in every test."""
+
+
+@pytest.fixture
+def snapshot(snapshot: SnapshotAssertion) -> SnapshotAssertion:
+    """Snapshots in the Home Assistant format, kept in tests/snapshots.
+
+    syrupy and the Home Assistant test plugin both provide this fixture, and
+    which one wins depends on the order pip installed them in. Defining it here
+    takes precedence over both, so every environment reads the same file.
+    """
+    return snapshot.use_extension(HomeAssistantSnapshotExtension)
 
 
 @pytest.fixture

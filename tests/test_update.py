@@ -328,12 +328,12 @@ def accept_grid1(cloud: AnodeCloud) -> None:
     )
 
 
-async def install(hass: HomeAssistant, unique_id: str) -> None:
-    """Press Install, the way the dashboard does."""
+async def install(hass: HomeAssistant, *unique_ids: str) -> None:
+    """Press Install, or Update all, the way the dashboard does."""
     await hass.services.async_call(
         "update",
         "install",
-        {"entity_id": entity_id(hass, "update", unique_id)},
+        {"entity_id": [entity_id(hass, "update", unique_id) for unique_id in unique_ids]},
         blocking=True,
     )
     await hass.async_block_till_done()
@@ -462,31 +462,65 @@ async def test_sent_update_shows_until_status_reports_it(
     assert not firmware.is_updating("grid1")
 
 
-async def test_install_refused_while_another_device_updates(
+async def test_install_while_another_device_updates(
     hass: HomeAssistant, installable: MockConfigEntry, cloud: AnodeCloud
 ) -> None:
-    """The hub takes one update at a time, so the person is told which."""
+    """The hub queues it, and it shows as installing while it waits its turn."""
+    accept_grid1(cloud)
+    runtime = installable.runtime_data
     cloud.respond("GET", STATUS, json=status_with(bat02=True))
-    await refresh(hass, installable.runtime_data.status)
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "bat02")})
-    assert device is not None
+    await refresh(hass, runtime.status)
 
-    with pytest.raises(HomeAssistantError) as err:
-        await install(hass, "grid1_firmware")
-    assert err.value.translation_key == "update_in_progress"
-    assert err.value.translation_placeholders == {"device": device.name}
-    assert not cloud.calls("PUT", OTA_LATEST)
+    queued = status_with(bat02=True)
+    queued["meter"][0]["otaQueued"] = True
+    cloud.respond("GET", STATUS, json=queued)
+    await install(hass, "grid1_firmware")
+    assert [dict(url.query) for url, _ in cloud.calls("PUT", OTA_LATEST)] == [{"id": "grid1"}]
+
+    # Status answering after the send lets the hub's queue take over.
+    await refresh(hass, runtime.status)
+    await refresh(hass, runtime.firmware)
+    grid1 = state(hass, "update", "grid1_firmware")
+    assert grid1.attributes["in_progress"] is True
+    assert grid1.attributes["update_percentage"] is None
+    assert state(hass, "update", "bat02_firmware").attributes["update_percentage"] == 42
 
 
-async def test_install_refused_while_one_is_being_sent(
+async def test_queued_device_keeps_polling_between_updates(
     hass: HomeAssistant, installable: MockConfigEntry, cloud: AnodeCloud
 ) -> None:
-    """A second press while the first is on its way is not sent."""
-    async with installable.runtime_data.firmware.lock:
-        with pytest.raises(HomeAssistantError) as err:
-            await install(hass, "grid1_firmware")
-    assert err.value.translation_key == "update_in_progress_hub"
-    assert not cloud.calls("PUT", OTA_LATEST)
+    """Nothing flashing but something waiting still counts as busy."""
+    runtime = installable.runtime_data
+    queued = load_fixture("status.json")
+    queued["meter"][0]["otaQueued"] = True
+    queued["hub"]["otaQueued"] = True
+    cloud.respond("GET", STATUS, json=queued)
+    await refresh(hass, runtime.status)
+
+    assert runtime.firmware.update_interval == OTA_PROGRESS_INTERVAL
+    assert runtime.status.update_interval == OTA_STATUS_INTERVAL
+    for unique_id in ("grid1_firmware", f"{HUB_ID}_firmware"):
+        assert state(hass, "update", unique_id).attributes["in_progress"] is True
+
+
+async def test_update_all_sends_every_device(
+    hass: HomeAssistant, installable: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """Update all on the Updates page hands the hub every device at once."""
+    for device_id in ("grid1", "solar1"):
+        cloud.respond(
+            "PUT",
+            OTA_LATEST,
+            query={"id": device_id},
+            json=load_fixture("ota_latest.json")
+            | {"ids": [device_id], "updates": [{"id": device_id, "from": "1.1.0", "to": "1.2.0"}]},
+        )
+    cloud.respond("GET", STATUS, json=status_with(grid1=True, solar1=True))
+
+    await install(hass, "grid1_firmware", "solar1_firmware")
+
+    sent = sorted(url.query["id"] for url, _ in cloud.calls("PUT", OTA_LATEST))
+    assert sent == ["grid1", "solar1"]
 
 
 @pytest.mark.parametrize(

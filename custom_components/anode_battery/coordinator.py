@@ -164,16 +164,23 @@ def updating_devices(status: HubStatus) -> list[str]:
     return devices
 
 
+def queued_devices(status: HubStatus) -> list[str]:
+    """The devices status reports waiting in the hub's firmware queue."""
+    devices = [status.hub_id] if status.ota_queued else []
+    devices.extend(device.id for device in status.sub_devices if device.ota_queued)
+    return devices
+
+
 class AnodeFirmwareCoordinator(_AnodeCoordinator[int | None]):
     """Progress of a firmware update, read only while one runs.
 
     The hub updates one device at a time and reports progress for itself as a
-    whole, so this holds one percent. It also holds the updates Home Assistant
-    has started that status has not shown yet, and the lock that keeps two from
-    being sent at once, since the hub refuses a second while one runs.
+    whole, so this holds one percent. Updates sent while one runs wait in the
+    hub's own queue. This also holds the updates Home Assistant has sent that
+    status has not shown yet.
 
-    It polls only while something is updating, and meanwhile has status read
-    more often so the entities see the update finish.
+    It polls only while something is updating or queued, and meanwhile has
+    status read more often so the entities see each update start and finish.
     """
 
     def __init__(
@@ -188,7 +195,6 @@ class AnodeFirmwareCoordinator(_AnodeCoordinator[int | None]):
         self._status = status
         self._status_interval = status.update_interval
         self._pending: dict[str, datetime] = {}
-        self.lock = asyncio.Lock()
 
     def updating(self) -> list[str]:
         """Every device updating, whether status shows it yet or not."""
@@ -204,6 +210,16 @@ class AnodeFirmwareCoordinator(_AnodeCoordinator[int | None]):
     def is_updating(self, device_id: str) -> bool:
         """Whether a firmware update is running, or was just sent, for a device."""
         return device_id in self.updating()
+
+    def is_queued(self, device_id: str) -> bool:
+        """Whether a device is waiting in the hub's firmware queue."""
+        return self._status.data is not None and device_id in queued_devices(self._status.data)
+
+    def busy(self) -> bool:
+        """Whether anything is updating, just sent, or waiting its turn."""
+        return bool(self.updating()) or bool(
+            self._status.data is not None and queued_devices(self._status.data)
+        )
 
     def progress(self, device_id: str) -> int | None:
         """The percent for a device, when it is the only one updating."""
@@ -232,7 +248,7 @@ class AnodeFirmwareCoordinator(_AnodeCoordinator[int | None]):
 
     @callback
     def _async_sync(self) -> None:
-        if self.updating():
+        if self.busy():
             if self.update_interval is None:
                 self.update_interval = OTA_PROGRESS_INTERVAL
                 if self._status_interval is None or self._status_interval > OTA_STATUS_INTERVAL:
@@ -245,6 +261,7 @@ class AnodeFirmwareCoordinator(_AnodeCoordinator[int | None]):
 
     async def _async_update_data(self) -> int | None:
         if not self.updating():
+            # Between devices in the queue: nothing is flashing to report on.
             return None
         try:
             percent = await self.client.get_ota_progress(self.hub_id)

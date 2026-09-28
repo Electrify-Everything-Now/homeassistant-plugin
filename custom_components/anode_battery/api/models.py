@@ -173,6 +173,8 @@ class SubDevice:
     latest_version: str | None = None
     update_available: bool = False
     ota_in_progress: bool = False
+    #: Waiting in the hub's firmware queue. Hubs that cannot queue never say so.
+    ota_queued: bool = False
 
     @classmethod
     def from_api(cls, data: Any) -> SubDevice:
@@ -190,6 +192,7 @@ class SubDevice:
             latest_version=_str(data.get("latestVersion")),
             update_available=data.get("updateAvailable") is True,
             ota_in_progress=data.get("otaInProgress") is True,
+            ota_queued=data.get("otaQueued") is True,
         )
 
     @property
@@ -232,6 +235,8 @@ class HubStatus:
     #: offered a downgrade.
     update_available: bool = False
     ota_in_progress: bool = False
+    #: The hub updates itself last, so it can wait in its own queue too.
+    ota_queued: bool = False
 
     @classmethod
     def from_api(cls, hub_id: str, data: Any) -> HubStatus:
@@ -249,6 +254,7 @@ class HubStatus:
             latest_version=_str(hub.get("latestVersion")),
             update_available=hub.get("updateAvailable") is True,
             ota_in_progress=hub.get("otaInProgress") is True,
+            ota_queued=hub.get("otaQueued") is True,
         )
 
     def with_metadata(self, metadata: dict[str, DeviceMetadata]) -> HubStatus:

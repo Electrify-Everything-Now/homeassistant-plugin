@@ -15,9 +15,12 @@ the server knows what the account's firmware train holds; the server joins the
 two and answers `updateAvailable`, so this platform reads a verdict rather than
 reaching one. ``version_is_newer`` is overridden for exactly that reason.
 
-The hub updates one device at a time and refuses a second command while one
-runs, so installs are sent one at a time per hub and refused here, with the
-device that is updating named, rather than sent to be refused there.
+The hub updates one device at a time. Current hub firmware queues whatever
+it is sent meanwhile, so an install is sent straight away and the device shows
+as installing while it waits its turn; installing several at once (Update all
+on the Updates page) simply queues them all. Older hub firmware refuses a
+second update while one runs, and that refusal names the busy device and
+suggests updating the hub.
 """
 from __future__ import annotations
 
@@ -55,8 +58,7 @@ from .entity import AnodeEntity, async_run_command, async_setup_dynamic_entities
 
 _LOGGER = logging.getLogger(__name__)
 
-# Installs are serialised per hub by the firmware coordinator's lock instead,
-# which also lets a second one be refused rather than queued.
+# The hub queues updates itself, so installs need not wait on one another.
 PARALLEL_UPDATES = 0
 
 #: How to apply an update where this key may not install one. Ends every set of
@@ -209,7 +211,12 @@ class AnodeUpdateEntity(AnodeEntity[AnodeStatusCoordinator], UpdateEntity):
 
     @property
     def in_progress(self) -> bool:
-        return self._sending or self._firmware.is_updating(self._device_id)
+        firmware = self._firmware
+        return (
+            self._sending
+            or firmware.is_updating(self._device_id)
+            or firmware.is_queued(self._device_id)
+        )
 
     @property
     def update_percentage(self) -> int | None:
@@ -230,12 +237,6 @@ class AnodeUpdateEntity(AnodeEntity[AnodeStatusCoordinator], UpdateEntity):
     async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
         """Ask the server to move this device up to the latest firmware."""
         firmware = self._firmware
-        # Home Assistant only checks this entity. The hub takes one update at a
-        # time, so one running on any of its devices refuses this one too.
-        if firmware.lock.locked():
-            raise self._in_progress_error(None)
-        if updating := firmware.updating():
-            raise self._in_progress_error(updating[0])
         if self.coordinator.data is not None and not _device_online(
             self.coordinator.data, self._device_id
         ):
@@ -246,15 +247,14 @@ class AnodeUpdateEntity(AnodeEntity[AnodeStatusCoordinator], UpdateEntity):
                 translation_placeholders={"device": self._device_name(self._device_id)},
             )
 
-        async with firmware.lock:
-            self._sending = True
-            self.async_write_ha_state()
-            try:
-                result = await async_run_command(
-                    self.hass, self.coordinator.config_entry, self._async_send()
-                )
-            finally:
-                self._sending = False
+        self._sending = True
+        self.async_write_ha_state()
+        try:
+            result = await async_run_command(
+                self.hass, self.coordinator.config_entry, self._async_send()
+            )
+        finally:
+            self._sending = False
 
         if not any(update.device_id == self._device_id for update in result.updates):
             # Status was out of date: the device is current after all.
@@ -268,14 +268,14 @@ class AnodeUpdateEntity(AnodeEntity[AnodeStatusCoordinator], UpdateEntity):
         firmware.async_note_started(self._device_id)
 
     async def _async_send(self) -> FirmwareUpdateResult:
-        """Send the update, naming the device when another is updating."""
+        """Send the update, naming the busy device when an older hub refuses it."""
         try:
             return await self.coordinator.client.update_firmware(
                 self.coordinator.hub_id, self._device_id
             )
         except AnodeUpdateInProgressError as err:
-            # Something this integration did not start, so status has not seen
-            # it: read it now so the entities catch up.
+            # Only a hub too old to queue refuses a second update. Read status
+            # so the entities show the one it is busy with.
             self.hass.async_create_task(self.coordinator.async_request_refresh())
             raise self._in_progress_error(err.device_id) from err
         except AnodeHubRefusedError as err:

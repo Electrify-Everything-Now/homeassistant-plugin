@@ -159,14 +159,16 @@ on the new version. The device restarts to finish, and the hub stops answering
 for about a minute when it is the one updating; the entity stays available
 through that.
 
-The hub updates one device at a time. While one is updating, installing another
-is refused with a message naming the device that is busy, so try again once it
-finishes. Updates started from the Anode app show here as installing too.
+The hub updates one device at a time and queues the rest, so you can install
+several at once, including with **Update all** under **Settings → Updates**.
+Each device shows as installing from when it is sent, and its progress appears
+once its turn comes. The hub keeps the queue, so it carries on if Home
+Assistant restarts, and it updates itself last. Updates started from the Anode
+app show here as installing too.
 
-Home Assistant installs one device at a time. To update every device at once,
-use **Update all** on your hub page in the Anode web dashboard at
-https://anode.energy/dashboard/user/overview; the devices show as installing
-here as the hub works through them.
+Older hub firmware takes one update at a time and refuses another while one is
+running, with a message naming the device that is busy. Update the hub first to
+be able to install several at once.
 
 Entries set up with an API key made by hand, or linked before this version,
 cannot install: the entity reports updates and its release notes say where to

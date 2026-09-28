@@ -330,10 +330,10 @@
       "message": "Anode did not allow this key to make changes. Reconfigure the integration to link again, or use an API key with full access."
     },
     "update_in_progress": {
-      "message": "A firmware update is already running on {device}. The hub updates one device at a time, so try again once it finishes."
+      "message": "A firmware update is already running on {device}, and this hub's firmware can only take one at a time. Try again once it finishes, or update the hub first: newer hub firmware queues updates, so several can be installed at once."
     },
     "update_in_progress_hub": {
-      "message": "A firmware update is already running on this hub. The hub updates one device at a time, so try again once it finishes."
+      "message": "A firmware update is already running on this hub, and its firmware can only take one at a time. Try again once it finishes, or update the hub first: newer hub firmware queues updates, so several can be installed at once."
     },
     "update_refused": {
       "message": "The hub did not start the firmware update: {info}"

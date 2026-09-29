@@ -3,8 +3,8 @@ rules:
   action-setup: done
   appropriate-polling: done
   brands:
-    status: todo
-    comment: Logo and icon need submitting to home-assistant/brands.
+    status: done
+    comment: Shipped in brand/, which Home Assistant 2026.3+ reads. Older releases show a placeholder. To be moved to brands repo if we want to be part of core.
   common-modules: done
   config-flow-test-coverage: done
   config-flow: done

@@ -126,7 +126,7 @@ Batteries, meters and repeaters paired later appear automatically. A device the 
 | Import energy, Export energy | Lifetime counters in kWh |
 | Voltage, Current, Power factor | Disabled by default. Enable them from the entity's settings |
 | Online | Whether the hub reports the meter as connected |
-| Meter type, Parent meter, Firmware version, Uptime | Diagnostic |
+| Meter type, Firmware version, Uptime | Diagnostic |
 | Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
 
 A meter is treated as a grid meter when its type is `PRIMARY` or its purpose in the Anode app is **Primary**, and as generation when its type is `EXT_INVERTER` or its purpose is **Solar**.

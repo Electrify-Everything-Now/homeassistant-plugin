@@ -442,13 +442,6 @@ METER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
     ),
     _FIRMWARE_VERSION,
     _SUB_DEVICE_UPTIME,
-    AnodeSubDeviceSensorDescription(
-        key="parent_meter",
-        translation_key="parent_meter",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda device: device.parent_meter,
-        exists_fn=lambda device: device.parent_meter is not None,
-    ),
 )
 
 

@@ -258,9 +258,6 @@
       "meter_type": {
         "name": "Meter type"
       },
-      "parent_meter": {
-        "name": "Parent meter"
-      },
       "pack_voltage": {
         "name": "Pack voltage"
       },

@@ -291,7 +291,7 @@ async def installable(hass: HomeAssistant, cloud: AnodeCloud) -> MockConfigEntry
         title="Home hub",
         unique_id=HUB_ID,
         version=1,
-        minor_version=2,
+        minor_version=3,
         data={
             CONF_AUTH_TYPE: AUTH_LINK,
             CONF_EMAIL: EMAIL,

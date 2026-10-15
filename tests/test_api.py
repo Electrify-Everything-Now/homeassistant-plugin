@@ -70,7 +70,7 @@ async def test_hub_status_and_metadata(client: AnodeClient) -> None:
     assert status.online is True
     assert status.version == "2.4.1"
     assert set(status.batteries) == {"bat01", "bat02"}
-    assert status.meters["ev001"].parent_meter == "grid1"
+    assert status.meters["ev001"].meter_type is MeterType.LOAD
     assert status.meters["grid1"].meter_type is MeterType.PRIMARY
     assert status.repeaters["rep01"].version == "v0.2.0"
     assert status.sub_device("rep01") is status.repeaters["rep01"]

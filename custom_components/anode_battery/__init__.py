@@ -29,6 +29,7 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     REMOVED_HUB_SELECT_KEYS,
+    REMOVED_METER_SENSOR_KEYS,
 )
 from .coordinator import (
     AnodeConfigEntry,
@@ -156,6 +157,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> b
     if entry.minor_version < 2:
         _async_remove_retired_entities(hass, entry)
         hass.config_entries.async_update_entry(entry, minor_version=2)
+    if entry.minor_version < 3:
+        _async_remove_retired_sensors(hass, entry)
+        hass.config_entries.async_update_entry(entry, minor_version=3)
     return True
 
 
@@ -185,6 +189,20 @@ def _async_remove_retired_entities(hass: HomeAssistant, entry: AnodeConfigEntry)
             "entities": "\n".join(f"- `{entity_id}`" for entity_id in sorted(removed))
         },
     )
+
+
+@callback
+def _async_remove_retired_sensors(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
+    """Remove the meter sensors whose readings the hub does not report."""
+    registry = er.async_get(hass)
+    suffixes = tuple(f"_{key}" for key in REMOVED_METER_SENSOR_KEYS)
+    removed: list[str] = []
+    for registry_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if registry_entry.domain == "sensor" and registry_entry.unique_id.endswith(suffixes):
+            removed.append(registry_entry.entity_id)
+            registry.async_remove(registry_entry.entity_id)
+    if removed:
+        _LOGGER.info("Removed retired Anode sensors: %s", ", ".join(sorted(removed)))
 
 
 def _firmware_permission_issue_id(entry: AnodeConfigEntry) -> str:

@@ -1,7 +1,7 @@
 """Tests for Anode update entities."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from typing import Any
 
@@ -446,6 +446,7 @@ async def test_install_survives_the_reboot(
 
 
 async def test_sent_update_shows_until_status_reports_it(
+    frozen_time: datetime,
     hass: HomeAssistant,
     installable: MockConfigEntry,
     cloud: AnodeCloud,

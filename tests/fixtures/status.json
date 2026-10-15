@@ -48,7 +48,6 @@
       "version": "1.1.0",
       "uptime": 43200000,
       "type": "LOAD",
-      "parentMeter": "grid1",
       "online": true
     }
   ],

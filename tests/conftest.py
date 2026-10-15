@@ -58,7 +58,7 @@ def mock_config_entry() -> MockConfigEntry:
         title="Home hub",
         unique_id=HUB_ID,
         version=1,
-        minor_version=2,
+        minor_version=3,
         data={CONF_EMAIL: EMAIL, CONF_API_KEY: API_KEY, CONF_HUB_ID: HUB_ID},
     )
 

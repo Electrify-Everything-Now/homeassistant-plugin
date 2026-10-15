@@ -63,3 +63,6 @@ REMOVED_HUB_SELECT_KEYS: Final = (
     "idle_override",
     "match_override",
 )
+
+# Unique-id suffixes of the meter sensors removed in config entry version 1.3.
+REMOVED_METER_SENSOR_KEYS: Final = ("parent_meter",)

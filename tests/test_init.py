@@ -99,7 +99,6 @@ EXPECTED_UNIQUE_IDS = {
                 "uptime",
             )
         ),
-        "ev001_parent_meter",
         "rep01_version",
         "rep01_uptime",
     },
@@ -276,7 +275,7 @@ async def test_migration_removes_retired_entities(hass: HomeAssistant, cloud: An
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     assert registry.async_get("select.anode_hub_ehxbt_charge_override") is None
     # Kept entities keep their original entity ids.
     for kept in ("house_energy_today", "grid_import_energy", "house_energy"):
@@ -295,7 +294,42 @@ async def test_migration_without_retired_entities(hass: HomeAssistant, cloud: An
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"retired_entities_{entry.entry_id}") is None
+
+
+async def test_migration_removes_parent_meter(hass: HomeAssistant, cloud: AnodeCloud) -> None:
+    """Upgrading from 1.2 removes parent meter sensors and keeps the rest."""
+    entry = legacy_entry(minor_version=2)
+    entry.add_to_hass(hass)
+    other = MockConfigEntry(domain=DOMAIN, unique_id="other", version=1, minor_version=3)
+    other.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for config_entry, device, key in (
+        (entry, "ev001", "parent_meter"),
+        (entry, "solar1", "parent_meter"),
+        (entry, "ev001", "power"),
+        (entry, "ev001", "type"),
+        (other, "ev999", "parent_meter"),
+    ):
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{device}_{key}",
+            suggested_object_id=f"anode_meter_{device}_{key}",
+            config_entry=config_entry,
+        )
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.minor_version == 3
+    for removed in ("ev001", "solar1"):
+        assert registry.async_get(f"sensor.anode_meter_{removed}_parent_meter") is None
+    # Kept entities keep their original entity ids.
+    for kept in ("ev001_power", "ev001_type"):
+        assert hass.states.get(f"sensor.anode_meter_{kept}") is not None
+    assert registry.async_get("sensor.anode_meter_ev999_parent_meter") is not None
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"retired_entities_{entry.entry_id}") is None
 
 

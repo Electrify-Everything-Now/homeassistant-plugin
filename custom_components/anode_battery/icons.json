@@ -137,9 +137,6 @@
       },
       "meter_type": {
         "default": "mdi:label-outline"
-      },
-      "parent_meter": {
-        "default": "mdi:link"
       }
     },
     "update": {

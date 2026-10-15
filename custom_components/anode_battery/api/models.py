@@ -164,7 +164,6 @@ class SubDevice:
     version: str | None = None
     uptime_ms: int | None = None
     meter_type: MeterType | None = None
-    parent_meter: str | None = None
     online: bool | None = None
     alias: str | None = None
     meter_purpose: str | None = None
@@ -187,7 +186,6 @@ class SubDevice:
             version=_str(data.get("version")),
             uptime_ms=_int(data.get("uptime")),
             meter_type=_enum(MeterType, data.get("type")),
-            parent_meter=_str(data.get("parentMeter")),
             online=_bool(data.get("online")),
             latest_version=_str(data.get("latestVersion")),
             update_available=data.get("updateAvailable") is True,

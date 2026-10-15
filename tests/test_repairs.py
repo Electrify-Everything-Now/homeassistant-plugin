@@ -30,7 +30,7 @@ def linked_entry(**data: Any) -> MockConfigEntry:
         title="Home hub",
         unique_id=HUB_ID,
         version=1,
-        minor_version=2,
+        minor_version=3,
         data={
             CONF_AUTH_TYPE: AUTH_LINK,
             CONF_EMAIL: EMAIL,
@@ -91,7 +91,7 @@ async def test_suggested_while_an_update_waits(
                 domain=DOMAIN,
                 unique_id=HUB_ID,
                 version=1,
-                minor_version=2,
+                minor_version=3,
                 data={CONF_EMAIL: EMAIL, CONF_API_KEY: "key", CONF_HUB_ID: HUB_ID},
             ),
             id="api key",

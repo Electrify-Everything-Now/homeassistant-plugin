@@ -53,7 +53,6 @@ async def test_meter_sensors(hass: HomeAssistant, init_integration: MockConfigEn
     assert value(hass, "grid1_export_energy") == 30
     assert value(hass, "solar1_export_power") == 2500
     assert state(hass, "sensor", "grid1_type").state == "PRIMARY"
-    assert state(hass, "sensor", "ev001_parent_meter").state == "grid1"
 
 
 async def test_hub_totals(hass: HomeAssistant, init_integration: MockConfigEntry) -> None:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import logging
 from typing import NoReturn
@@ -43,6 +43,7 @@ from .const import (
     OTA_STATUS_INTERVAL,
     SETTINGS_POLL_INTERVAL,
 )
+from .energy import EnergyTotals
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -292,6 +293,9 @@ class Telemetry:
     batteries_current: bool
     meters_current: bool
     inverters_current: bool
+    #: Hub lifetime energy totals in kWh, keyed as their sensors. Only those
+    #: this read could count on are present.
+    energy: dict[str, float] = field(default_factory=dict)
 
     def is_current(self, device_id: str) -> bool:
         """Whether the device reported in the latest successful read."""
@@ -314,9 +318,17 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
             hass, entry, client, hub_id, name="telemetry", update_interval=update_interval
         )
         self._status = status
+        self.energy = EnergyTotals(hass, entry.entry_id)
         self._failing: set[str] = set()
         self._bms: dict[str, BmsReading] = {}
         self._bms_due: dict[str, datetime] = {}
+
+    async def _async_setup(self) -> None:
+        await self.energy.async_load()
+
+    async def async_shutdown(self) -> None:
+        await super().async_shutdown()
+        await self.energy.async_save()
 
     async def _async_update_data(self) -> Telemetry:
         batteries, meters, inverters = await asyncio.gather(
@@ -365,7 +377,7 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
             inverter_map.update(inverters)
             reported.update(inverters)
 
-        return Telemetry(
+        telemetry = Telemetry(
             batteries=battery_map,
             meters=meter_map,
             inverters=inverter_map,
@@ -374,6 +386,9 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
             meters_current=not isinstance(meters, AnodeError),
             inverters_current=not isinstance(inverters, AnodeError),
         )
+        if (status := self._status.data) is None:
+            return telemetry
+        return replace(telemetry, energy=self.energy.update(status, telemetry))
 
     async def _async_get_inverters(self) -> dict[str, InverterReading] | None:
         """Inverter readings, or None when the hub has no inverters to read."""

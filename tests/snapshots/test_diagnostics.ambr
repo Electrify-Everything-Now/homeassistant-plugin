@@ -254,6 +254,13 @@
           }),
         }),
         'batteries_current': True,
+        'energy': dict({
+          'battery_cumulative_charge_energy': 1422.691,
+          'battery_cumulative_discharge_energy': 1130.4279999999999,
+          'grid_export_energy': 30.0,
+          'grid_import_energy': 500.0,
+          'house_energy': 256.73699999999997,
+        }),
         'inverters': dict({
           'inv01': dict({
             'ac_power_w': -800.0,

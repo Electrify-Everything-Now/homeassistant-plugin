@@ -221,8 +221,8 @@ async def test_givenergy_supplying_the_house(
 
     # 200 from the grid and 1800 from the inverter.
     assert value(hass, f"{HUB_ID}_house_power") == 2000
-    # (500 - 30) grid + (250 - 12) inverter
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(708)
+    # (500 - 30) grid. The inverter counts on from its first reading.
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(470)
     assert value(hass, f"{HUB_ID}_battery_energy_capacity") == pytest.approx(8857.6)
     assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "80"
 
@@ -230,7 +230,8 @@ async def test_givenergy_supplying_the_house(
     readings["inverter"][0]["energy"]["export"]["value"] += 50_000
     cloud.respond("GET", INVERTERS, json=readings)
     await refresh(hass, mock_config_entry.runtime_data.telemetry)
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(713)
+    # The inverter supplied another 5 kWh.
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(475)
 
 
 async def test_inverter_battery_is_inside_its_ac_port(
@@ -269,7 +270,7 @@ async def test_house_unknown_without_the_inverter(
     cloud.respond("GET", INVERTERS, json=readings)
     await refresh(hass, telemetry)
     assert state(hass, "sensor", f"{HUB_ID}_house_power").state == STATE_UNAVAILABLE
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(494.737)
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(256.737)
 
 
 async def test_house_energy_needs_every_inverter(

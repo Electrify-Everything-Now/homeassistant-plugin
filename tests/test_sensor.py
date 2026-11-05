@@ -78,9 +78,9 @@ async def test_hub_totals(hass: HomeAssistant, init_integration: MockConfigEntry
     assert value(hass, f"{HUB_ID}_battery_cumulative_discharge_energy") == pytest.approx(1130.428)
     # 2000 grid - (-2500) solar - (-800) inverter - (1500 + -500) batteries
     assert value(hass, f"{HUB_ID}_house_power") == 4300
-    # (500 - 30) grid + (80 - 1) solar + (250 - 12) inverter
-    # + (730.428 - 922.691) + (400 - 500) batteries
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(494.737)
+    # (500 - 30) grid + (80 - 1) solar + (730.428 - 922.691) + (400 - 500)
+    # batteries. The inverter counts from its first reading, so adds nothing yet.
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(256.737)
     assert value(hass, f"{HUB_ID}_grid_import_energy") == pytest.approx(500)
     assert value(hass, f"{HUB_ID}_grid_export_energy") == pytest.approx(30)
 
@@ -133,7 +133,7 @@ async def test_battery_dropout(
     assert state(hass, "sensor", "bat02_charge_energy").state == STATE_UNAVAILABLE
     assert value(hass, "bat01_power") == 1500
     assert value(hass, f"{HUB_ID}_battery_cumulative_charge_energy") == pytest.approx(1422.691)
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(494.737)
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(256.737)
     # (4528.8 + 7086.08) / (6038.4 + 8857.6), bat02 left out
     assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "78"
 
@@ -179,7 +179,7 @@ async def test_house_energy_not_seeded_from_partial_data(
 
     cloud.respond("GET", BATTERIES, json=load_fixture("batteries.json"))
     await refresh(hass, mock_config_entry.runtime_data.telemetry)
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(494.737)
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(256.737)
 
 
 async def test_house_energy_never_decreases(
@@ -190,14 +190,14 @@ async def test_house_energy_never_decreases(
     batteries[0]["importEnergy"]["value"] = 20_000_000
     cloud.respond("GET", BATTERIES, json=batteries)
     await refresh(hass, init_integration.runtime_data.telemetry)
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(494.737)
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(256.737)
 
     meters = load_fixture("meters.json")
     meters[0]["importEnergy"]["value"] = 50_000_000
     cloud.respond("GET", METERS, json=meters)
     await refresh(hass, init_integration.runtime_data.telemetry)
-    # (5000 - 30) + 79 + 238 + (730.428 - 2000) + (400 - 500)
-    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(3917.428)
+    # 256.737 - (2000 - 922.691) charged + (5000 - 500) imported
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(3679.428)
 
 
 async def test_energy_totals_hold_across_restart(
@@ -216,14 +216,14 @@ async def test_energy_totals_hold_across_restart(
         hass,
         [
             (
-                State(entity_id, "600.0"),
-                {"native_value": 600.0, "native_unit_of_measurement": "kWh"},
+                State(entity_id, "300.0"),
+                {"native_value": 300.0, "native_unit_of_measurement": "kWh"},
             )
         ],
     )
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert float(hass.states.get(entity_id).state) == 600.0
+    assert float(hass.states.get(entity_id).state) == 300.0
 
 
 @pytest.mark.usefixtures("frozen_time")

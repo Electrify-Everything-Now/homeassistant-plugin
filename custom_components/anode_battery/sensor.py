@@ -1,7 +1,7 @@
 """Sensor platform for the Anode integration."""
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime
 import logging
@@ -51,6 +51,13 @@ from .coordinator import (
     AnodeTelemetryCoordinator,
     ModeState,
     Telemetry,
+)
+from .energy import (
+    BATTERY_CHARGE_ENERGY,
+    BATTERY_DISCHARGE_ENERGY,
+    GRID_EXPORT_ENERGY,
+    GRID_IMPORT_ENERGY,
+    HOUSE_ENERGY,
 )
 from .entity import AnodeEntity, async_setup_dynamic_entities
 
@@ -651,42 +658,6 @@ def _average_soc(status: HubStatus, telemetry: Telemetry) -> float | None:
     return round(totals[1] / totals[0] * 100)
 
 
-def _counter_total(
-    readings: Mapping[str, BatteryReading | MeterReading],
-    device_ids: Iterable[str],
-    attr: str,
-) -> float | None:
-    """Sum one lifetime energy counter over several devices.
-
-    Unknown if any device has never reported: leaving it out would make the
-    total jump down now and up later. A device that has reported but has no
-    counter yet (no energy history on the server) counts as zero.
-    """
-    values: list[float | None] = []
-    for device_id in device_ids:
-        if (reading := readings.get(device_id)) is None:
-            return None
-        values.append(getattr(reading, attr))
-    known = [value for value in values if value is not None]
-    return sum(known) if known else None
-
-
-def _battery_counter_total(
-    status: HubStatus, telemetry: Telemetry, attr: str
-) -> float | None:
-    """Sum a lifetime counter over every battery."""
-    if not status.batteries or not telemetry.batteries_current:
-        return None
-    return _counter_total(telemetry.batteries, status.batteries, attr)
-
-
-def _grid_counter_total(status: HubStatus, telemetry: Telemetry, attr: str) -> float | None:
-    """Sum a lifetime counter over every grid meter."""
-    if not status.grid_meters or not telemetry.meters_current:
-        return None
-    return _counter_total(telemetry.meters, (m.id for m in status.grid_meters), attr)
-
-
 def _house_power(status: HubStatus, telemetry: Telemetry) -> float | None:
     """Grid power minus generation, inverter and battery power; positive is consumption.
 
@@ -715,48 +686,9 @@ def _house_power(status: HubStatus, telemetry: Telemetry) -> float | None:
     return total
 
 
-def _house_energy(status: HubStatus, telemetry: Telemetry) -> float | None:
-    """Net house consumption (kWh) projected from lifetime counters.
-
-    house = (grid import - grid export)
-          + (generation export - generation import)
-          + (inverter AC export - inverter AC import)
-          + (battery discharge - battery charge)
-
-    Needs the latest meter read, and battery and inverter reads where there
-    are any, to have succeeded. A device that has never reported makes the
-    total unknown rather than treating its counters as zero.
-    """
-    grid = status.grid_meters
-    if not grid or not telemetry.meters_current:
-        return None
-    if status.batteries and not telemetry.batteries_current:
-        return None
-    if status.inverters and not telemetry.inverters_current:
-        return None
-    total = 0.0
-    for meter in grid:
-        if (reading := telemetry.meters.get(meter.id)) is None:
-            return None
-        total += (reading.import_energy_kwh or 0.0) - (reading.export_energy_kwh or 0.0)
-    for meter in status.generation_meters:
-        if (reading := telemetry.meters.get(meter.id)) is None:
-            return None
-        total += (reading.export_energy_kwh or 0.0) - (reading.import_energy_kwh or 0.0)
-    for inverter_id in status.inverters:
-        if (inverter := telemetry.inverters.get(inverter_id)) is None:
-            return None
-        # The hub leaves these out until its first detailed read of the
-        # inverter, and they are lifetime totals the inverter keeps itself:
-        # zero meanwhile would make the house total leap once they arrive.
-        if inverter.import_energy_kwh is None or inverter.export_energy_kwh is None:
-            return None
-        total += inverter.export_energy_kwh - inverter.import_energy_kwh
-    for battery_id in status.batteries:
-        if (battery := telemetry.batteries.get(battery_id)) is None:
-            return None
-        total += (battery.discharge_energy_kwh or 0.0) - (battery.charge_energy_kwh or 0.0)
-    return total
+def _energy_total(key: str) -> Callable[[HubStatus, Telemetry], float | None]:
+    """Read one of the lifetime totals the telemetry coordinator counts on."""
+    return lambda _status, telemetry: telemetry.energy.get(key)
 
 
 HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
@@ -795,7 +727,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         exists_fn=_has_batteries,
         monotonic=True,
-        value_fn=lambda s, t: _battery_counter_total(s, t, "charge_energy_kwh"),
+        value_fn=_energy_total(BATTERY_CHARGE_ENERGY),
     ),
     AnodeHubTelemetrySensorDescription(
         key="battery_cumulative_discharge_energy",
@@ -805,7 +737,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         exists_fn=_has_batteries,
         monotonic=True,
-        value_fn=lambda s, t: _battery_counter_total(s, t, "discharge_energy_kwh"),
+        value_fn=_energy_total(BATTERY_DISCHARGE_ENERGY),
     ),
     AnodeHubTelemetrySensorDescription(
         key="grid_import_energy",
@@ -815,7 +747,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         exists_fn=_has_grid_meter,
         monotonic=True,
-        value_fn=lambda s, t: _grid_counter_total(s, t, "import_energy_kwh"),
+        value_fn=_energy_total(GRID_IMPORT_ENERGY),
     ),
     AnodeHubTelemetrySensorDescription(
         key="grid_export_energy",
@@ -825,7 +757,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         exists_fn=_has_grid_meter,
         monotonic=True,
-        value_fn=lambda s, t: _grid_counter_total(s, t, "export_energy_kwh"),
+        value_fn=_energy_total(GRID_EXPORT_ENERGY),
     ),
     AnodeHubTelemetrySensorDescription(
         key="house_power",
@@ -844,7 +776,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         exists_fn=_has_grid_meter,
         monotonic=True,
-        value_fn=_house_energy,
+        value_fn=_energy_total(HOUSE_ENERGY),
     ),
 )
 
@@ -895,10 +827,9 @@ class AnodeDailyEnergySensor(AnodeEntity[AnodeTelemetryCoordinator], SensorEntit
     """Energy since local midnight, from one of the hub's lifetime totals.
 
     Today's figure is the lifetime total minus a baseline: the last total seen
-    before midnight. If the total falls during the day (a counter reset or a
-    replaced device), the baseline moves so today's figure is kept and counting
-    carries on. The baseline is restored after a restart, so energy used while
-    Home Assistant was stopped still counts.
+    before midnight. Should the total ever fall, the baseline moves so today's
+    figure is kept and counting carries on. The baseline is restored after a
+    restart, so energy used while Home Assistant was stopped still counts.
     """
 
     entity_description: AnodeHubTelemetrySensorDescription

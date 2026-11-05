@@ -40,6 +40,7 @@ from .coordinator import (
     AnodeStatusCoordinator,
     AnodeTelemetryCoordinator,
 )
+from .energy import async_remove_energy_totals
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -142,8 +143,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> bo
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
-    """Drop the suggestions made for an entry that is gone."""
+    """Drop the suggestions and stored totals of an entry that is gone."""
     ir.async_delete_issue(hass, DOMAIN, _firmware_permission_issue_id(entry))
+    await async_remove_energy_totals(hass, entry.entry_id)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:

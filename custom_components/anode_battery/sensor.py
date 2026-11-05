@@ -590,21 +590,41 @@ def _has_batteries(status: HubStatus) -> bool:
     return bool(status.batteries)
 
 
+def _has_battery_storage(status: HubStatus) -> bool:
+    return bool(status.batteries or status.battery_inverters)
+
+
 def _has_grid_meter(status: HubStatus) -> bool:
     return bool(status.grid_meters)
+
+
+def _battery_energies(
+    status: HubStatus, telemetry: Telemetry
+) -> Iterator[tuple[float | None, float | None]]:
+    """Capacity and remaining energy (Wh) of every battery reporting now."""
+    for battery_id in status.batteries:
+        if telemetry.is_current(battery_id):
+            reading = telemetry.batteries[battery_id]
+            yield reading.energy_capacity_wh, reading.energy_remaining_wh
+    for inverter in status.battery_inverters:
+        if telemetry.is_current(inverter.id):
+            inverter_reading = telemetry.inverters[inverter.id]
+            yield (
+                inverter_reading.battery_energy_capacity_wh,
+                inverter_reading.battery_energy_remaining_wh,
+            )
 
 
 def _battery_energy_totals(
     status: HubStatus, telemetry: Telemetry
 ) -> tuple[float, float] | None:
-    """Sum capacity and remaining energy (Wh) over batteries reporting now."""
+    """Sum capacity and remaining energy (Wh) over batteries of known capacity reporting now.
+
+    Inverter batteries count alongside hub batteries.
+    """
     total = remaining = 0.0
     found = False
-    for battery_id in status.batteries:
-        if not telemetry.is_current(battery_id):
-            continue
-        reading = telemetry.batteries[battery_id]
-        capacity, left = reading.energy_capacity_wh, reading.energy_remaining_wh
+    for capacity, left in _battery_energies(status, telemetry):
         if capacity is None or left is None:
             continue
         total += capacity
@@ -624,7 +644,7 @@ def _total_energy_remaining(status: HubStatus, telemetry: Telemetry) -> float | 
 
 
 def _average_soc(status: HubStatus, telemetry: Telemetry) -> float | None:
-    """Capacity-weighted state of charge across batteries."""
+    """Capacity-weighted state of charge across batteries, as the hub weighs its fleet."""
     totals = _battery_energy_totals(status, telemetry)
     if totals is None or not totals[0]:
         return None
@@ -668,7 +688,10 @@ def _grid_counter_total(status: HubStatus, telemetry: Telemetry, attr: str) -> f
 
 
 def _house_power(status: HubStatus, telemetry: Telemetry) -> float | None:
-    """Grid power minus generation and battery power; positive is consumption."""
+    """Grid power minus generation, inverter and battery power; positive is consumption.
+
+    An inverter counts by its AC port, which already carries its own battery.
+    """
     if not status.grid_meters:
         return None
     total = 0.0
@@ -680,6 +703,12 @@ def _house_power(status: HubStatus, telemetry: Telemetry) -> float | None:
         if not telemetry.is_current(meter.id):
             return None
         total -= telemetry.meters[meter.id].power_w
+    for inverter_id in status.inverters:
+        if not telemetry.is_current(inverter_id):
+            return None
+        if (ac_power := telemetry.inverters[inverter_id].ac_power_w) is None:
+            return None
+        total -= ac_power
     for battery_id in status.batteries:
         if telemetry.is_current(battery_id):
             total -= telemetry.batteries[battery_id].power_w
@@ -691,16 +720,19 @@ def _house_energy(status: HubStatus, telemetry: Telemetry) -> float | None:
 
     house = (grid import - grid export)
           + (generation export - generation import)
+          + (inverter AC export - inverter AC import)
           + (battery discharge - battery charge)
 
-    Needs the latest meter read, and battery read if there are batteries, to
-    have succeeded. A device that has never reported makes the total unknown
-    rather than treating its counters as zero.
+    Needs the latest meter read, and battery and inverter reads where there
+    are any, to have succeeded. A device that has never reported makes the
+    total unknown rather than treating its counters as zero.
     """
     grid = status.grid_meters
     if not grid or not telemetry.meters_current:
         return None
     if status.batteries and not telemetry.batteries_current:
+        return None
+    if status.inverters and not telemetry.inverters_current:
         return None
     total = 0.0
     for meter in grid:
@@ -711,6 +743,15 @@ def _house_energy(status: HubStatus, telemetry: Telemetry) -> float | None:
         if (reading := telemetry.meters.get(meter.id)) is None:
             return None
         total += (reading.export_energy_kwh or 0.0) - (reading.import_energy_kwh or 0.0)
+    for inverter_id in status.inverters:
+        if (inverter := telemetry.inverters.get(inverter_id)) is None:
+            return None
+        # The hub leaves these out until its first detailed read of the
+        # inverter, and they are lifetime totals the inverter keeps itself:
+        # zero meanwhile would make the house total leap once they arrive.
+        if inverter.import_energy_kwh is None or inverter.export_energy_kwh is None:
+            return None
+        total += inverter.export_energy_kwh - inverter.import_energy_kwh
     for battery_id in status.batteries:
         if (battery := telemetry.batteries.get(battery_id)) is None:
             return None
@@ -725,7 +766,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY_STORAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
-        exists_fn=_has_batteries,
+        exists_fn=_has_battery_storage,
         value_fn=_total_energy_capacity,
     ),
     AnodeHubTelemetrySensorDescription(
@@ -734,7 +775,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY_STORAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
-        exists_fn=_has_batteries,
+        exists_fn=_has_battery_storage,
         value_fn=_total_energy_remaining,
     ),
     AnodeHubTelemetrySensorDescription(
@@ -743,7 +784,7 @@ HUB_TELEMETRY_SENSORS: tuple[AnodeHubTelemetrySensorDescription, ...] = (
         device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
-        exists_fn=_has_batteries,
+        exists_fn=_has_battery_storage,
         value_fn=_average_soc,
     ),
     AnodeHubTelemetrySensorDescription(

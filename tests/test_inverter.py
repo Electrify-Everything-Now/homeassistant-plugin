@@ -14,7 +14,17 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.anode_battery.const import DOMAIN
 
-from .common import INVERTERS, STATUS, AnodeCloud, load_fixture, refresh, state
+from .common import (
+    BATTERIES,
+    HUB_ID,
+    INVERTERS,
+    METERS,
+    STATUS,
+    AnodeCloud,
+    load_fixture,
+    refresh,
+    state,
+)
 
 PV_KEYS = {"pv_power", "pv_energy"}
 BATTERY_KEYS = {
@@ -181,3 +191,124 @@ async def test_inverter_dropout(
     # Status entities come from hub status, not telemetry.
     assert state(hass, "sensor", "inv01_version").state == "v1.0.0"
     assert er.async_get(hass).async_get_entity_id("sensor", DOMAIN, "inv01_pv_power")
+
+
+def inverter_reading(**changes: Any) -> dict[str, Any]:
+    """The fixture inverter read, with AC or battery power changed."""
+    readings = load_fixture("inverters.json")
+    detailed = readings["inverter"][0]["detailed"]
+    for block, watts in changes.items():
+        detailed[block]["power"]["value"] = watts
+    return readings
+
+
+async def test_givenergy_supplying_the_house(
+    hass: HomeAssistant, cloud: AnodeCloud, mock_config_entry: MockConfigEntry
+) -> None:
+    """With a grid meter and a hybrid inverter only, what the inverter supplies is house load."""
+    status = load_fixture("status.json")
+    status["battery"] = []
+    status["meter"] = [m for m in status["meter"] if m["id"] == "grid1"]
+    cloud.respond("GET", STATUS, json=status)
+    cloud.respond("GET", BATTERIES, json=[])
+    meters = [m for m in load_fixture("meters.json") if m["id"] == "grid1"]
+    meters[0]["power"]["value"] = 200
+    cloud.respond("GET", METERS, json=meters)
+    cloud.respond("GET", INVERTERS, json=inverter_reading(ac=-1800))
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # 200 from the grid and 1800 from the inverter.
+    assert value(hass, f"{HUB_ID}_house_power") == 2000
+    # (500 - 30) grid + (250 - 12) inverter
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(708)
+    assert value(hass, f"{HUB_ID}_battery_energy_capacity") == pytest.approx(8857.6)
+    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "80"
+
+    readings = inverter_reading(ac=-1800)
+    readings["inverter"][0]["energy"]["export"]["value"] += 50_000
+    cloud.respond("GET", INVERTERS, json=readings)
+    await refresh(hass, mock_config_entry.runtime_data.telemetry)
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(713)
+
+
+async def test_inverter_battery_is_inside_its_ac_port(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """House power follows the AC port; the battery behind it is not counted again."""
+    cloud.respond("GET", INVERTERS, json=inverter_reading(ac=-800, battery=-2000))
+    await refresh(hass, init_integration.runtime_data.telemetry)
+    assert value(hass, f"{HUB_ID}_house_power") == 4300
+
+    cloud.respond("GET", INVERTERS, json=inverter_reading(ac=300))
+    await refresh(hass, init_integration.runtime_data.telemetry)
+    # The inverter now draws 300 W, charging its battery from the grid.
+    assert value(hass, f"{HUB_ID}_house_power") == 3200
+
+
+async def test_house_unknown_without_the_inverter(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """House figures pause while the inverter's part of them is unknown, rather than guess."""
+    telemetry = init_integration.runtime_data.telemetry
+    cloud.respond("GET", INVERTERS, json={"status": False, "info": "No inverter data yet"})
+    await refresh(hass, telemetry)
+    assert state(hass, "sensor", f"{HUB_ID}_house_power").state == STATE_UNAVAILABLE
+    assert state(hass, "sensor", f"{HUB_ID}_house_energy").state == STATE_UNAVAILABLE
+
+    readings = load_fixture("inverters.json")
+    del readings["inverter"][0]["energy"]
+    cloud.respond("GET", INVERTERS, json=readings)
+    await refresh(hass, telemetry)
+    assert value(hass, f"{HUB_ID}_house_power") == 4300
+    assert state(hass, "sensor", f"{HUB_ID}_house_energy").state == STATE_UNAVAILABLE
+
+    readings = load_fixture("inverters.json")
+    del readings["inverter"][0]["detailed"]["ac"]
+    cloud.respond("GET", INVERTERS, json=readings)
+    await refresh(hass, telemetry)
+    assert state(hass, "sensor", f"{HUB_ID}_house_power").state == STATE_UNAVAILABLE
+    assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(494.737)
+
+
+async def test_house_energy_needs_every_inverter(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """An inverter that has never reported makes house energy unknown."""
+    status = load_fixture("status.json")
+    status["inverter"].append({**status["inverter"][0], "id": "inv02"})
+    cloud.respond("GET", STATUS, json=status)
+    await refresh(hass, init_integration.runtime_data.status)
+    await refresh(hass, init_integration.runtime_data.telemetry)
+    assert state(hass, "sensor", f"{HUB_ID}_house_energy").state == STATE_UNAVAILABLE
+    assert state(hass, "sensor", f"{HUB_ID}_house_power").state == STATE_UNAVAILABLE
+
+
+async def test_soc_counts_inverter_batteries_of_known_capacity(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """The inverter battery weighs into the average by capacity, and only once it is known."""
+    # (4528.8 + 2400 + 7086.08) / (6038.4 + 4800 + 8857.6)
+    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "71"
+
+    readings = load_fixture("inverters.json")
+    readings["inverter"][0]["detailed"]["battery"]["capacity"]["value"] = 0
+    cloud.respond("GET", INVERTERS, json=readings)
+    await refresh(hass, init_integration.runtime_data.telemetry)
+    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "64"
+    assert value(hass, f"{HUB_ID}_battery_energy_capacity") == 10838.4
+    assert state(hass, "sensor", "inv01_battery_energy_capacity").state == STATE_UNKNOWN
+
+
+async def test_soc_ignores_a_battery_the_inverter_does_not_claim(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """Battery readings from an inverter without the BATTERY capability are left out."""
+    status = load_fixture("status.json")
+    status["inverter"][0]["capabilities"] = ["PV"]
+    cloud.respond("GET", STATUS, json=status)
+    await refresh(hass, init_integration.runtime_data.status)
+    await refresh(hass, init_integration.runtime_data.telemetry)
+    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "64"
+    assert value(hass, f"{HUB_ID}_battery_energy_remaining") == 6928.8

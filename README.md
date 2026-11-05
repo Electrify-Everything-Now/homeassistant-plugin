@@ -56,7 +56,7 @@ Open **Settings → Devices & services → Anode → Configure**.
 
 | Option | Default | Controls |
 | --- | --- | --- |
-| Device list and firmware | 120 s | Which batteries, meters and repeaters are paired, firmware versions, and names from the Anode app |
+| Device list and firmware | 120 s | Which batteries, meters, repeaters and inverters are paired, firmware versions, and names from the Anode app |
 | Power and energy readings | 30 s | Power, state of charge and energy counters |
 
 Both have a minimum of 10 seconds. Each read is relayed from the Anode cloud to the hub over the internet. The mode and schedule are read every 5 minutes and just after each scheduled change. Battery limits are read every 10 minutes.
@@ -71,9 +71,9 @@ Linking again issues a new key and leaves the old one in place, so delete the on
 
 ## Devices and entities
 
-The integration creates a device for the hub and for each battery, meter and repeater. Device names come from the Anode app and update when you rename a device there; a name you set in Home Assistant takes precedence.
+The integration creates a device for the hub and for each battery, meter, repeater and inverter. Device names come from the Anode app and update when you rename a device there; a name you set in Home Assistant takes precedence.
 
-Batteries, meters and repeaters paired later appear automatically. A device the hub no longer reports can be deleted from its device page.
+Batteries, meters, repeaters and inverters paired later appear automatically. A device the hub no longer reports can be deleted from its device page.
 
 ### Hub
 
@@ -88,11 +88,11 @@ Batteries, meters and repeaters paired later appear automatically. A device the 
 | Cancel override | Ends an override early and returns the hub to its schedule |
 | Maximum charge power, Maximum discharge power | Fleet power limits in watts. Hubs that store limits as a percent also get **(percent)** versions |
 | Grid import energy, Grid export energy | Lifetime totals across grid meters. Created when a grid meter exists |
-| House power | Grid power minus generation and battery power. Created when a grid meter exists |
+| House power | Grid power minus generation, inverter and battery power. Created when a grid meter exists |
 | House energy | Lifetime net house consumption. Created when a grid meter exists |
-| Battery charge energy, Battery discharge energy | Lifetime totals across all batteries |
+| Battery charge energy, Battery discharge energy | Lifetime totals across the hub's batteries. An inverter's battery has its own, on the inverter |
 | Grid import energy today, Grid export energy today, House energy today, Battery charge energy today, Battery discharge energy today | Energy since midnight. See [Energy today](#energy-today) |
-| Battery energy capacity, Battery energy remaining, Average state of charge | Totals and capacity-weighted average across batteries |
+| Battery energy capacity, Battery energy remaining, Average state of charge | Totals and capacity-weighted average across batteries, including inverter batteries whose capacity is known |
 | Firmware version, Uptime | Diagnostic |
 | Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
 
@@ -141,9 +141,29 @@ Repeaters take no readings, so they have only status entities. When a battery or
 | Firmware version, Uptime | Diagnostic |
 | Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
 
+### Inverter
+
+An inverter device is a bridge to a PV or hybrid inverter from another maker, such as Solis or GivEnergy. PV entities are created only for an inverter that reports PV, and battery entities only for one that reports a battery.
+
+| Entity | Description |
+| --- | --- |
+| State | Generating, Standby, Fault or Communication lost |
+| AC power | Power at the inverter's AC connection: negative while it supplies the house or grid, positive while it draws power |
+| AC import energy, AC export energy | Lifetime counters in kWh for the AC connection |
+| Temperature | The inverter's own temperature reading |
+| PV power, PV energy | Solar generation, and its lifetime total in kWh |
+| Battery power | Positive while charging, negative while discharging |
+| Battery state of charge, Battery energy capacity | Percent, and usable watt-hours |
+| Battery charge energy, Battery discharge energy | Lifetime counters in kWh |
+| Online | Whether the hub reports the inverter as connected |
+| Fault code, Firmware version, Uptime | Diagnostic. The fault code is the inverter maker's own, 0 for none |
+| Firmware | Whether newer firmware is available for the device, and installs it where the integration is allowed to — see [Firmware updates](#firmware-updates) |
+
+The hub's **House power** and **House energy** count an inverter by its AC connection, as they count a solar meter. Its battery is behind that connection, so it is not counted again.
+
 ## Firmware updates
 
-Each hub, battery, meter and repeater gets a **Firmware** entity that turns on when newer
+Each hub, battery, meter, repeater and inverter gets a **Firmware** entity that turns on when newer
 firmware is available for it, and shows the release notes for that version.
 
 Where the integration was set up by linking, it may also install them. The
@@ -187,9 +207,11 @@ has no entity rather than an entity stuck at "unknown".
 | --- | --- |
 | Grid consumption | Hub **Grid import energy** |
 | Return to grid | Hub **Grid export energy** |
-| Solar production | Solar meter **Export energy** |
+| Solar production | Solar meter **Export energy**, or an inverter's **PV energy** |
 | Battery: energy going in | Hub **Battery charge energy** |
 | Battery: energy coming out | Hub **Battery discharge energy** |
+
+Add an inverter's battery as a battery of its own, with its **Battery charge energy** and **Battery discharge energy**.
 
 The hub's grid sensors keep working if the grid meter is replaced or a second one is added, so the Energy dashboard does not need changing. The grid meter's own **Import energy** and **Export energy** sensors report the same counters.
 

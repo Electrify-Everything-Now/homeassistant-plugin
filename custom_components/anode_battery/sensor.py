@@ -433,6 +433,11 @@ REPEATER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
     _SUB_DEVICE_UPTIME,
 )
 
+INVERTER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
+    _FIRMWARE_VERSION,
+    _SUB_DEVICE_UPTIME,
+)
+
 METER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
     AnodeSubDeviceSensorDescription(
         key="type",
@@ -855,6 +860,10 @@ async def async_setup_entry(
             for description in REPEATER_STATUS_SENSORS:
                 if description.exists_fn(repeater):
                     yield AnodeSubDeviceSensor(runtime.status, repeater.id, description)
+        for inverter in status.inverters.values():
+            for description in INVERTER_STATUS_SENSORS:
+                if description.exists_fn(inverter):
+                    yield AnodeSubDeviceSensor(runtime.status, inverter.id, description)
 
     async_setup_dynamic_entities(entry, async_add_entities, build)
 
@@ -945,7 +954,7 @@ class AnodeModeSensor(AnodeEntity[AnodeModeCoordinator], SensorEntity):
 
 
 class AnodeSubDeviceSensor(AnodeEntity[AnodeStatusCoordinator], SensorEntity):
-    """Battery, meter or repeater sensor read from hub status."""
+    """Sub-device sensor read from hub status."""
 
     entity_description: AnodeSubDeviceSensorDescription
 

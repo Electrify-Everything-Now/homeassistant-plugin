@@ -1,6 +1,6 @@
 """Update platform for the Anode integration.
 
-Every hub, battery, meter and repeater gets an entity saying what it runs and what it
+Every hub, battery, meter, repeater and inverter gets an entity saying what it runs and what it
 could be running. Where the key may install firmware, the entity can also
 install it, and is then listed under Settings → Updates: Home Assistant only
 lists update entities that can install.
@@ -112,6 +112,9 @@ async def async_setup_entry(
         for device_id, repeater in status.repeaters.items():
             if repeater.latest_version is not None:
                 yield entity(device_id, ProductCode.REPEATER)
+        for device_id, inverter in status.inverters.items():
+            if inverter.latest_version is not None:
+                yield entity(device_id, ProductCode.INVERTER)
 
     async_setup_dynamic_entities(entry, async_add_entities, build)
 
@@ -146,7 +149,7 @@ def _release_notes_body(note: ReleaseNote | None, footer: str | None) -> str | N
 
 
 class AnodeUpdateEntity(AnodeEntity[AnodeStatusCoordinator], UpdateEntity):
-    """Firmware available for one hub, battery, meter or repeater."""
+    """Firmware available for one hub or sub-device."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_translation_key = "firmware"

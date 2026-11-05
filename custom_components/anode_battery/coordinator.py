@@ -115,7 +115,7 @@ class _AnodeCoordinator[DataT](DataUpdateCoordinator[DataT]):
 
 
 class AnodeStatusCoordinator(_AnodeCoordinator[HubStatus]):
-    """Hub status: which batteries, meters and repeaters exist, firmware, aliases."""
+    """Hub status: which devices are paired, their firmware and aliases."""
 
     def __init__(
         self,

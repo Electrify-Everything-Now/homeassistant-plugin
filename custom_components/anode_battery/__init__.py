@@ -265,7 +265,7 @@ def async_check_firmware_permission(
 
 @callback
 def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: HubStatus) -> None:
-    """Create or update the hub, battery, meter and repeater devices.
+    """Create or update the hub, battery, meter, repeater and inverter devices.
 
     Web-UI aliases are written to ``name``, not ``name_by_user``, so a rename
     made in Home Assistant still wins.
@@ -330,6 +330,14 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             name=repeater.alias or f"Anode Repeater {repeater.id}",
             model="Repeater",
             sw_version=repeater.version,
+            via_device_id=hub,
+        )
+    for inverter in status.inverters.values():
+        upsert(
+            inverter.id,
+            name=inverter.alias or f"Anode Inverter {inverter.id}",
+            model="Inverter",
+            sw_version=inverter.version,
             via_device_id=hub,
         )
 

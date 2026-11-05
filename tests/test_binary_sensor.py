@@ -63,6 +63,19 @@ async def test_repeater_offline(
     assert state(hass, "binary_sensor", "rep01_online").state == STATE_OFF
 
 
+async def test_inverter_offline(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """An inverter has a connectivity sensor like any other device."""
+    assert state(hass, "binary_sensor", "inv01_online").state == STATE_ON
+
+    status = load_fixture("status.json")
+    status["inverter"][0]["online"] = False
+    cloud.respond("GET", STATUS, json=status)
+    await refresh(hass, init_integration.runtime_data.status)
+    assert state(hass, "binary_sensor", "inv01_online").state == STATE_OFF
+
+
 @pytest.mark.usefixtures("frozen_time")
 async def test_override_active(
     hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud

@@ -23,6 +23,7 @@ from .api import (
     BmsReading,
     DeviceMetadata,
     HubStatus,
+    InverterReading,
     MeterReading,
     OperatingMode,
     PowerLimit,
@@ -277,7 +278,7 @@ class AnodeFirmwareCoordinator(_AnodeCoordinator[int | None]):
 
 @dataclass(frozen=True, slots=True)
 class Telemetry:
-    """Latest battery and meter readings.
+    """Latest battery, meter and inverter readings.
 
     Readings are kept per device after it stops reporting, so energy
     calculations never substitute zero for a device that dropped out. Use
@@ -286,9 +287,11 @@ class Telemetry:
 
     batteries: dict[str, BatteryReading]
     meters: dict[str, MeterReading]
+    inverters: dict[str, InverterReading]
     reported: frozenset[str]
     batteries_current: bool
     meters_current: bool
+    inverters_current: bool
 
     def is_current(self, device_id: str) -> bool:
         """Whether the device reported in the latest successful read."""
@@ -305,26 +308,33 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
         client: AnodeClient,
         hub_id: str,
         update_interval: timedelta,
+        status: AnodeStatusCoordinator,
     ) -> None:
         super().__init__(
             hass, entry, client, hub_id, name="telemetry", update_interval=update_interval
         )
+        self._status = status
         self._failing: set[str] = set()
         self._bms: dict[str, BmsReading] = {}
         self._bms_due: dict[str, datetime] = {}
 
     async def _async_update_data(self) -> Telemetry:
-        batteries, meters = await asyncio.gather(
+        batteries, meters, inverters = await asyncio.gather(
             self.client.get_batteries(self.hub_id),
             self.client.get_meters(self.hub_id),
+            self._async_get_inverters(),
             return_exceptions=True,
         )
-        for result in (batteries, meters):
+        for result in (batteries, meters, inverters):
             if isinstance(result, AnodeAuthError) or (
                 isinstance(result, BaseException) and not isinstance(result, AnodeError)
             ):
                 self._raise_update_error("telemetry", result)
-        if isinstance(batteries, AnodeError) and isinstance(meters, AnodeError):
+        if all(
+            isinstance(result, AnodeError)
+            for result in (batteries, meters, inverters)
+            if result is not None
+        ):
             self._raise_update_error("telemetry", batteries)
 
         previous = self.data
@@ -347,13 +357,30 @@ class AnodeTelemetryCoordinator(_AnodeCoordinator[Telemetry]):
             meter_map.update(meters)
             reported.update(meters)
 
+        inverter_map = dict(previous.inverters) if previous else {}
+        if isinstance(inverters, AnodeError):
+            self._note_failure("inverter", inverters)
+        elif inverters is not None:
+            self._note_success("inverter")
+            inverter_map.update(inverters)
+            reported.update(inverters)
+
         return Telemetry(
             batteries=battery_map,
             meters=meter_map,
+            inverters=inverter_map,
             reported=frozenset(reported),
             batteries_current=not isinstance(batteries, AnodeError),
             meters_current=not isinstance(meters, AnodeError),
+            inverters_current=not isinstance(inverters, AnodeError),
         )
+
+    async def _async_get_inverters(self) -> dict[str, InverterReading] | None:
+        """Inverter readings, or None when the hub has no inverters to read."""
+        status = self._status.data
+        if status is None or not status.inverters:
+            return None
+        return await self.client.get_inverters(self.hub_id)
 
     async def _async_add_bms(
         self, batteries: dict[str, BatteryReading]

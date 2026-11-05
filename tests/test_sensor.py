@@ -19,7 +19,18 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.anode_battery.const import DOMAIN
 
-from .common import BATTERIES, HUB_ID, METERS, MODE, STATUS, AnodeCloud, load_fixture, refresh, state
+from .common import (
+    BATTERIES,
+    HUB_ID,
+    INVERTERS,
+    METERS,
+    MODE,
+    STATUS,
+    AnodeCloud,
+    load_fixture,
+    refresh,
+    state,
+)
 
 
 def value(hass: HomeAssistant, unique_id: str) -> float:
@@ -141,9 +152,10 @@ async def test_failed_battery_read(
 async def test_all_telemetry_failing(
     hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
 ) -> None:
-    """If neither read succeeds every reading is unavailable."""
+    """If no read succeeds every reading is unavailable."""
     cloud.respond("GET", BATTERIES, status=HTTPStatus.BAD_GATEWAY)
     cloud.respond("GET", METERS, status=HTTPStatus.BAD_GATEWAY)
+    cloud.respond("GET", INVERTERS, status=HTTPStatus.BAD_GATEWAY)
     await refresh(hass, init_integration.runtime_data.telemetry)
     assert not init_integration.runtime_data.telemetry.last_update_success
     assert state(hass, "sensor", "grid1_power").state == STATE_UNAVAILABLE
@@ -267,13 +279,14 @@ async def test_readings_poll_every_30_seconds(
     init_integration: MockConfigEntry,
     cloud: AnodeCloud,
 ) -> None:
-    """Battery and meter readings are fetched again once 30 seconds pass.
+    """Battery, meter and inverter readings are fetched again once 30 seconds pass.
 
     Time is frozen before setup (via frozen_time) so the coordinator's timer
     is scheduled on the same clock the test advances.
     """
     batteries_before = len(cloud.calls("GET", BATTERIES))
     meters_before = len(cloud.calls("GET", METERS))
+    inverters_before = len(cloud.calls("GET", INVERTERS))
 
     freezer.tick(timedelta(seconds=29))
     async_fire_time_changed(hass)
@@ -285,3 +298,4 @@ async def test_readings_poll_every_30_seconds(
     await hass.async_block_till_done()
     assert len(cloud.calls("GET", BATTERIES)) == batteries_before + 1
     assert len(cloud.calls("GET", METERS)) == meters_before + 1
+    assert len(cloud.calls("GET", INVERTERS)) == inverters_before + 1

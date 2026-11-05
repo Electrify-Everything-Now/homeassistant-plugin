@@ -85,6 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
         client,
         hub_id,
         timedelta(seconds=entry.options.get(CONF_DEVICE_INTERVAL, DEFAULT_DEVICE_INTERVAL)),
+        status,
     )
     mode = AnodeModeCoordinator(hass, entry, client, hub_id)
     settings = AnodeSettingsCoordinator(hass, entry, client, hub_id)

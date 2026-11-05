@@ -36,6 +36,30 @@ class MeterType(StrEnum):
     EXT_INVERTER = "EXT_INVERTER"
 
 
+class InverterCapability(StrEnum):
+    """What an inverter can do, as the hub names it in ``capabilities``.
+
+    Capabilities are kept as plain strings, so a name newer firmware adds is
+    carried along rather than dropped.
+    """
+
+    PV = "PV"
+    BATTERY = "BATTERY"
+    GRID_CT = "GRID_CT"
+    BACKUP = "BACKUP"
+    DISPATCHABLE = "DISPATCHABLE"
+
+
+class InverterState(StrEnum):
+    """What an inverter reports itself to be doing."""
+
+    UNKNOWN = "UNKNOWN"
+    GENERATING = "GENERATING"
+    STANDBY = "STANDBY"
+    FAULT = "FAULT"
+    COMMS_LOST = "COMMS_LOST"
+
+
 class PowerLimitKey(StrEnum):
     """Config keys holding fleet charge/discharge power limits."""
 
@@ -54,6 +78,7 @@ class ProductCode(IntEnum):
     METER = 2
     BATTERY = 3
     REPEATER = 4
+    INVERTER = 6
 
 
 # Unit factors, keyed by lower-cased unit string.
@@ -61,6 +86,7 @@ _POWER_TO_W = {"w": 1.0, "kw": 1000.0, "": 1.0}
 # Hardware counters are reported in deci-watt-hours (0.1 Wh).
 _ENERGY_TO_KWH = {"dwh": 1 / 10000, "wh": 1 / 1000, "kwh": 1.0}
 _VOLTAGE_TO_V = {"v": 1.0, "mv": 1 / 1000}
+_CHARGE_TO_AH = {"ah": 1.0, "": 1.0}
 
 
 def require_dict(data: Any, what: str) -> dict[str, Any]:
@@ -114,6 +140,16 @@ def _enum[E: StrEnum](enum: type[E], value: Any) -> E | None:
         return None
 
 
+def _positive(value: float | None) -> float | None:
+    return value if value is not None and value > 0 else None
+
+
+def _str_set(value: Any) -> frozenset[str]:
+    if not isinstance(value, list):
+        return frozenset()
+    return frozenset(filter(None, (_str(item) for item in value)))
+
+
 def _unit_value(data: dict[str, Any], key: str, factors: dict[str, float]) -> float | None:
     """Read a ``{"value": n, "unit": "..."}`` field and convert its unit."""
     entry = data.get(key)
@@ -158,7 +194,7 @@ def parse_device_metadata(data: Any) -> dict[str, DeviceMetadata]:
 
 @dataclass(frozen=True, slots=True)
 class SubDevice:
-    """A battery, meter or repeater as listed in hub status."""
+    """A battery, meter, repeater or inverter as listed in hub status."""
 
     id: str
     version: str | None = None
@@ -174,10 +210,12 @@ class SubDevice:
     ota_in_progress: bool = False
     #: Waiting in the hub's firmware queue. Hubs that cannot queue never say so.
     ota_queued: bool = False
+    #: What an inverter can do (``InverterCapability`` names). Empty for other devices.
+    capabilities: frozenset[str] = frozenset()
 
     @classmethod
     def from_api(cls, data: Any) -> SubDevice:
-        """Parse one entry of the status ``battery``/``meter``/``repeater`` arrays."""
+        """Parse one entry of the status ``battery``/``meter``/``repeater``/``inverter`` arrays."""
         data = require_dict(data, "status device")
         if not (device_id := _str(data.get("id"))):
             raise AnodeResponseError("Status device entry is missing an id")
@@ -191,6 +229,7 @@ class SubDevice:
             update_available=data.get("updateAvailable") is True,
             ota_in_progress=data.get("otaInProgress") is True,
             ota_queued=data.get("otaQueued") is True,
+            capabilities=_str_set(data.get("capabilities")),
         )
 
     @property
@@ -218,6 +257,8 @@ class HubStatus:
     meters: dict[str, SubDevice]
     #: Radio repeaters. They carry no readings, only what status reports.
     repeaters: dict[str, SubDevice]
+    #: Bridges to vendor PV or hybrid inverters.
+    inverters: dict[str, SubDevice]
     alias: str | None = None
     #: The newest image the account's firmware train holds for this hardware.
     #:
@@ -249,6 +290,7 @@ class HubStatus:
             batteries=_parse_sub_devices(data.get("battery")),
             meters=_parse_sub_devices(data.get("meter")),
             repeaters=_parse_sub_devices(data.get("repeater")),
+            inverters=_parse_sub_devices(data.get("inverter")),
             latest_version=_str(hub.get("latestVersion")),
             update_available=hub.get("updateAvailable") is True,
             ota_in_progress=hub.get("otaInProgress") is True,
@@ -271,19 +313,26 @@ class HubStatus:
             batteries={k: apply(v) for k, v in self.batteries.items()},
             meters={k: apply(v) for k, v in self.meters.items()},
             repeaters={k: apply(v) for k, v in self.repeaters.items()},
+            inverters={k: apply(v) for k, v in self.inverters.items()},
         )
 
     @property
     def sub_devices(self) -> list[SubDevice]:
-        """Every battery, meter and repeater paired to the hub."""
-        return [*self.batteries.values(), *self.meters.values(), *self.repeaters.values()]
+        """Every battery, meter, repeater and inverter paired to the hub."""
+        return [
+            *self.batteries.values(),
+            *self.meters.values(),
+            *self.repeaters.values(),
+            *self.inverters.values(),
+        ]
 
     def sub_device(self, device_id: str) -> SubDevice | None:
-        """A battery, meter or repeater by id."""
+        """A battery, meter, repeater or inverter by id."""
         return (
             self.batteries.get(device_id)
             or self.meters.get(device_id)
             or self.repeaters.get(device_id)
+            or self.inverters.get(device_id)
         )
 
     @property
@@ -295,6 +344,13 @@ class HubStatus:
     def generation_meters(self) -> list[SubDevice]:
         """Meters on generation sources."""
         return [m for m in self.meters.values() if m.is_generation_meter]
+
+    @property
+    def battery_inverters(self) -> list[SubDevice]:
+        """Inverters with a battery."""
+        return [
+            i for i in self.inverters.values() if InverterCapability.BATTERY in i.capabilities
+        ]
 
 
 def _parse_sub_devices(items: Any) -> dict[str, SubDevice]:
@@ -589,8 +645,95 @@ class MeterReading:
         )
 
 
+def _block(data: dict[str, Any], key: str) -> dict[str, Any]:
+    value = data.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _temperature(entry: dict[str, Any]) -> float | None:
+    if (value := _number(entry.get("value"))) is None:
+        return None
+    unit = entry.get("unit")
+    celsius = _to_celsius(value, unit if isinstance(unit, str) else "")
+    if celsius is None:
+        _LOGGER.warning("Ignoring temperature with unrecognised unit %r", unit)
+    return celsius
+
+
+@dataclass(frozen=True, slots=True)
+class InverterReading:
+    """Live readings for one inverter.
+
+    The hub leaves out every block the inverter lacks or has not reported yet,
+    so any field may be None. AC power uses meter signs (negative while
+    supplying); battery power is positive while charging.
+    """
+
+    state: InverterState | None = None
+    ac_power_w: float | None = None
+    #: The AC port's lifetime counters, as a meter's.
+    import_energy_kwh: float | None = None
+    export_energy_kwh: float | None = None
+    pv_power_w: float | None = None
+    pv_energy_kwh: float | None = None
+    battery_power_w: float | None = None
+    battery_soc_pct: float | None = None
+    battery_capacity_ah: float | None = None
+    battery_nominal_voltage_v: float | None = None
+    battery_charge_energy_kwh: float | None = None
+    battery_discharge_energy_kwh: float | None = None
+    temperature_c: float | None = None
+    #: The inverter's own fault or alarm code, 0 for none. Its meaning is per vendor.
+    vendor_fault: int | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> InverterReading:
+        """Parse one inverter reading."""
+        energy, detailed = _block(data, "energy"), _block(data, "detailed")
+        ac, pv, battery = (_block(detailed, key) for key in ("ac", "pv", "battery"))
+        energies = _block(detailed, "energies")
+        capacity = _block(battery, "capacity")
+        return cls(
+            state=_enum(InverterState, detailed.get("state")),
+            ac_power_w=_unit_value(ac, "power", _POWER_TO_W),
+            import_energy_kwh=_unit_value(energy, "import", _ENERGY_TO_KWH),
+            export_energy_kwh=_unit_value(energy, "export", _ENERGY_TO_KWH),
+            pv_power_w=_unit_value(pv, "power", _POWER_TO_W),
+            pv_energy_kwh=_unit_value(energies, "pv", _ENERGY_TO_KWH),
+            battery_power_w=_unit_value(battery, "power", _POWER_TO_W),
+            battery_soc_pct=_number(_block(battery, "soc").get("value")),
+            # The hub sends 0 for a capacity the inverter has not reported.
+            battery_capacity_ah=_positive(_unit_value(battery, "capacity", _CHARGE_TO_AH)),
+            battery_nominal_voltage_v=_positive(_number(capacity.get("nominalVoltage"))),
+            battery_charge_energy_kwh=_unit_value(energies, "batteryCharge", _ENERGY_TO_KWH),
+            battery_discharge_energy_kwh=_unit_value(
+                energies, "batteryDischarge", _ENERGY_TO_KWH
+            ),
+            temperature_c=_temperature(_block(detailed, "temperature")),
+            vendor_fault=_int(detailed.get("vendorFault")),
+        )
+
+    @property
+    def battery_energy_capacity_wh(self) -> float | None:
+        """Usable battery capacity in watt-hours."""
+        if self.battery_capacity_ah is None or self.battery_nominal_voltage_v is None:
+            return None
+        return self.battery_capacity_ah * self.battery_nominal_voltage_v
+
+    @property
+    def battery_energy_remaining_wh(self) -> float | None:
+        """Battery energy remaining in watt-hours.
+
+        From the state of charge, as the hub weighs its fleet average, rather
+        than from the remaining amp-hours the inverter also reports.
+        """
+        if (capacity := self.battery_energy_capacity_wh) is None or self.battery_soc_pct is None:
+            return None
+        return capacity * self.battery_soc_pct / 100
+
+
 def _parse_readings[R](data: Any, kind: str, parse: Any) -> dict[str, R]:
-    """Parse a batch battery/meter response: a JSON array with an id per item."""
+    """Parse a batch of readings: a JSON array with an id per item."""
     if isinstance(data, dict):
         raise_for_hub_failure(data, f"the {kind} read")
     if not isinstance(data, list):
@@ -615,6 +758,16 @@ def parse_batteries(data: Any) -> dict[str, BatteryReading]:
 def parse_meters(data: Any) -> dict[str, MeterReading]:
     """Parse ``GET /api/device/meter/{hub}`` (all meters)."""
     return _parse_readings(data, "meter", MeterReading.from_api)
+
+
+def parse_inverters(data: Any) -> dict[str, InverterReading]:
+    """Parse ``GET /api/device/inverter/{hub}`` (all inverters).
+
+    The hub answers ``{"status": false}`` until it has a reading for any of them.
+    """
+    data = require_dict(data, "inverter readings")
+    raise_for_hub_failure(data, "the inverter read")
+    return _parse_readings(data.get("inverter"), "inverter", InverterReading.from_api)
 
 
 def _slot_time(data: Any) -> time | None:

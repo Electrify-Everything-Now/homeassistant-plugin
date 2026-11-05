@@ -31,6 +31,7 @@ STATUS = f"/device/status/{HUB_ID}"
 METADATA = f"/user/device-metadata/{HUB_ID}"
 BATTERIES = f"/device/battery/{HUB_ID}"
 METERS = f"/device/meter/{HUB_ID}"
+INVERTERS = f"/device/inverter/{HUB_ID}"
 MODE = f"/device/{HUB_ID}/mode"
 RELEASE_NOTES = "/device/release-notes"
 SCHEDULE = f"/device/schedule/{HUB_ID}"
@@ -50,6 +51,7 @@ DEFAULT_ROUTES: tuple[tuple[str, str, str], ...] = (
     ("GET", METADATA, "device_metadata.json"),
     ("GET", BATTERIES, "batteries.json"),
     ("GET", METERS, "meters.json"),
+    ("GET", INVERTERS, "inverters.json"),
     ("GET", MODE, "mode.json"),
     ("GET", RELEASE_NOTES, "release_note.json"),
     ("GET", SCHEDULE, "schedule.json"),

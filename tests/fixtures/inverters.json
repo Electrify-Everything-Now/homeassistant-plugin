@@ -1,0 +1,58 @@
+{
+  "status": true,
+  "inverter": [
+    {
+      "id": "inv01",
+      "energy": {
+        "import": { "value": 120000, "unit": "dWh" },
+        "export": { "value": 2500000, "unit": "dWh" }
+      },
+      "detailed": {
+        "state": "GENERATING",
+        "vendor": "GIVENERGY",
+        "capabilities": ["PV", "BATTERY", "GRID_CT", "BACKUP", "DISPATCHABLE"],
+        "dataAge": { "value": 4332, "unit": "ms" },
+        "ac": {
+          "voltage": { "value": 241.3, "unit": "V" },
+          "current": { "value": 3.4, "unit": "A" },
+          "frequency": { "value": 50.04, "unit": "Hz" },
+          "power": { "value": -800, "unit": "W" },
+          "powerFactor": { "value": 0.846, "unit": "" },
+          "reactivePower": { "value": -680, "unit": "var" }
+        },
+        "pv": {
+          "power": { "value": 1200, "unit": "W" },
+          "strings": [
+            { "voltage": { "value": 390.6, "unit": "V" }, "current": { "value": 3.1, "unit": "A" } },
+            { "voltage": { "value": 43.1, "unit": "V" }, "current": { "value": 0, "unit": "A" } }
+          ]
+        },
+        "battery": {
+          "voltage": { "value": 53.53, "unit": "V" },
+          "current": { "value": 7.5, "unit": "A" },
+          "power": { "value": 400, "unit": "W" },
+          "soc": { "value": 80, "unit": "%" },
+          "capacity": { "value": 173, "unit": "Ah", "nominalVoltage": 51.2 },
+          "remainingCapacity": { "value": 138.4, "unit": "Ah" },
+          "cycles": 1998,
+          "powerStatus": "CHARGING",
+          "powerCommanded": { "value": 400, "unit": "W" },
+          "maxCharge": { "value": 2500, "unit": "W" },
+          "maxDischarge": { "value": 2200, "unit": "W" }
+        },
+        "grid": { "power": { "value": -5, "unit": "W" } },
+        "load": { "house": { "value": 648, "unit": "W" }, "backup": { "value": 0, "unit": "W" } },
+        "temperature": { "value": 34.1, "unit": "°C" },
+        "energies": {
+          "pv": { "value": 4526300, "unit": "dWh" },
+          "batteryCharge": { "value": 231400, "unit": "dWh" },
+          "batteryDischarge": { "value": 743600, "unit": "dWh" },
+          "gridImport": { "value": 6941, "unit": "dWh" },
+          "gridExport": { "value": 5281, "unit": "dWh" },
+          "load": { "value": 49772, "unit": "dWh" }
+        },
+        "vendorFault": 0
+      }
+    }
+  ]
+}

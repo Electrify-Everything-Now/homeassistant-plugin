@@ -19,8 +19,11 @@ from custom_components.anode_battery.coordinator import (
 )
 
 from .common import (
+    BATTERIES,
+    INVERTERS,
     MAX_CHARGE,
     METADATA,
+    METERS,
     SOC_CONFIG,
     STATUS,
     AnodeCloud,
@@ -115,3 +118,60 @@ async def test_settings_partial_failure_keeps_previous(
     assert settings.last_update_success
     assert settings.data.soc_limits["bat01"].min_soc == 30
     assert settings.data.power_limits[PowerLimitKey.MAX_CHARGE].watts == 4400
+
+
+async def test_inverters_read_with_telemetry(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """Inverter readings arrive on the same cycle as batteries and meters."""
+    telemetry = init_integration.runtime_data.telemetry
+    assert len(cloud.calls("GET", INVERTERS)) == 1
+    assert telemetry.data.inverters_current
+    assert telemetry.data.is_current("inv01")
+    assert telemetry.data.inverters["inv01"].ac_power_w == -800
+
+
+async def test_no_inverter_read_without_inverters(
+    hass: HomeAssistant, cloud: AnodeCloud, mock_config_entry: MockConfigEntry
+) -> None:
+    """A hub with no inverters is never asked for inverter readings."""
+    status = load_fixture("status.json")
+    del status["inverter"]
+    cloud.respond("GET", STATUS, json=status)
+    mock_config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    telemetry = mock_config_entry.runtime_data.telemetry
+    await refresh(hass, telemetry)
+    assert cloud.calls("GET", INVERTERS) == []
+    assert telemetry.data.inverters == {}
+    assert telemetry.data.inverters_current
+
+
+async def test_failed_inverter_read_keeps_the_rest(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """A failed inverter read marks only inverters out of date and keeps their last reading."""
+    telemetry = init_integration.runtime_data.telemetry
+    cloud.respond("GET", INVERTERS, json={"status": False, "info": "No inverter data yet"})
+    await refresh(hass, telemetry)
+
+    assert telemetry.last_update_success
+    assert not telemetry.data.inverters_current
+    assert not telemetry.data.is_current("inv01")
+    assert telemetry.data.inverters["inv01"].ac_power_w == -800
+    assert telemetry.data.batteries_current and telemetry.data.meters_current
+
+
+async def test_inverter_read_alone_keeps_telemetry_up(
+    hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
+) -> None:
+    """Telemetry fails only when every read does."""
+    telemetry = init_integration.runtime_data.telemetry
+    cloud.respond("GET", BATTERIES, status=HTTPStatus.BAD_GATEWAY)
+    cloud.respond("GET", METERS, status=HTTPStatus.BAD_GATEWAY)
+    await refresh(hass, telemetry)
+    assert telemetry.last_update_success
+    assert telemetry.data.is_current("inv01")
+    assert not telemetry.data.is_current("grid1")

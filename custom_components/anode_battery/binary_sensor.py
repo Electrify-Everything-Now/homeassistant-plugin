@@ -29,7 +29,9 @@ async def async_setup_entry(
         status = runtime.status.data
         yield AnodeHubOnlineSensor(runtime.status)
         yield AnodeOverrideActiveSensor(runtime.mode)
-        for device_id in (*status.batteries, *status.meters, *status.repeaters):
+        for device_id in (
+            *status.batteries, *status.meters, *status.repeaters, *status.inverters
+        ):
             yield AnodeSubDeviceOnlineSensor(runtime.status, device_id)
 
     async_setup_dynamic_entities(entry, async_add_entities, build)
@@ -59,7 +61,7 @@ class AnodeHubOnlineSensor(AnodeEntity[AnodeStatusCoordinator], BinarySensorEnti
 
 
 class AnodeSubDeviceOnlineSensor(AnodeEntity[AnodeStatusCoordinator], BinarySensorEntity):
-    """Whether the hub currently reports a battery, meter or repeater as connected."""
+    """Whether the hub currently reports a sub-device as connected."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_translation_key = "online"

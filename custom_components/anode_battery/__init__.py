@@ -40,6 +40,7 @@ from .coordinator import (
     AnodeStatusCoordinator,
     AnodeTelemetryCoordinator,
 )
+from .energy import async_remove_energy_totals
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> boo
         client,
         hub_id,
         timedelta(seconds=entry.options.get(CONF_DEVICE_INTERVAL, DEFAULT_DEVICE_INTERVAL)),
+        status,
     )
     mode = AnodeModeCoordinator(hass, entry, client, hub_id)
     settings = AnodeSettingsCoordinator(hass, entry, client, hub_id)
@@ -141,8 +143,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> bo
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
-    """Drop the suggestions made for an entry that is gone."""
+    """Drop the suggestions and stored totals of an entry that is gone."""
     ir.async_delete_issue(hass, DOMAIN, _firmware_permission_issue_id(entry))
+    await async_remove_energy_totals(hass, entry.entry_id)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: AnodeConfigEntry) -> None:
@@ -264,7 +267,7 @@ def async_check_firmware_permission(
 
 @callback
 def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: HubStatus) -> None:
-    """Create or update the hub, battery, meter and repeater devices.
+    """Create or update the hub, battery, meter, repeater and inverter devices.
 
     Web-UI aliases are written to ``name``, not ``name_by_user``, so a rename
     made in Home Assistant still wins.
@@ -329,6 +332,14 @@ def async_sync_devices(hass: HomeAssistant, entry: AnodeConfigEntry, status: Hub
             name=repeater.alias or f"Anode Repeater {repeater.id}",
             model="Repeater",
             sw_version=repeater.version,
+            via_device_id=hub,
+        )
+    for inverter in status.inverters.values():
+        upsert(
+            inverter.id,
+            name=inverter.alias or f"Anode Inverter {inverter.id}",
+            model="Inverter",
+            sw_version=inverter.version,
             via_device_id=hub,
         )
 

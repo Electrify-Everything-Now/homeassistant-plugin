@@ -22,6 +22,8 @@ from custom_components.anode_battery.api import (
     AnodeRateLimitError,
     AnodeResponseError,
     AnodeUpdateInProgressError,
+    InverterCapability,
+    InverterState,
     MeterType,
     OperatingMode,
     PowerLimit,
@@ -36,6 +38,7 @@ from .common import (
     BATTERIES,
     EMAIL,
     HUB_ID,
+    INVERTERS,
     MAX_CHARGE,
     METERS,
     MODE,
@@ -74,15 +77,45 @@ async def test_hub_status_and_metadata(client: AnodeClient) -> None:
     assert status.meters["grid1"].meter_type is MeterType.PRIMARY
     assert status.repeaters["rep01"].version == "v0.2.0"
     assert status.sub_device("rep01") is status.repeaters["rep01"]
+    assert status.sub_device("inv01") is status.inverters["inv01"]
+    assert status.inverters["inv01"].capabilities == {
+        "PV", "BATTERY", "GRID_CT", "BACKUP", "DISPATCHABLE"
+    }
+    assert status.meters["grid1"].capabilities == frozenset()
     assert [d.id for d in status.sub_devices] == [
-        "bat01", "bat02", "grid1", "solar1", "ev001", "rep01"
+        "bat01", "bat02", "grid1", "solar1", "ev001", "rep01", "inv01"
     ]
+    assert [i.id for i in status.battery_inverters] == ["inv01"]
 
     status = status.with_metadata(await client.get_device_metadata(HUB_ID))
     assert status.alias == "Home hub"
     assert status.batteries["bat01"].alias == "Garage battery"
+    assert status.inverters["inv01"].alias == "GivEnergy"
     assert [m.id for m in status.grid_meters] == ["grid1"]
     assert [m.id for m in status.generation_meters] == ["solar1"]
+
+
+async def test_hub_without_inverters(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """Hubs that predate inverters send no inverter array at all."""
+    status_json = load_fixture("status.json")
+    del status_json["inverter"]
+    cloud.respond("GET", STATUS, json=status_json)
+    status = await client.get_hub_status(HUB_ID)
+    assert status.inverters == {}
+    assert status.battery_inverters == []
+
+
+async def test_inverter_capabilities_decide_battery(
+    client: AnodeClient, cloud: AnodeCloud
+) -> None:
+    """Only the BATTERY capability makes an inverter's battery count; unknown names are kept."""
+    status_json = load_fixture("status.json")
+    status_json["inverter"][0]["capabilities"] = ["PV", "SOME_FUTURE_CAPABILITY", 7]
+    cloud.respond("GET", STATUS, json=status_json)
+    status = await client.get_hub_status(HUB_ID)
+    assert status.inverters["inv01"].capabilities == {"PV", "SOME_FUTURE_CAPABILITY"}
+    assert InverterCapability.PV in status.inverters["inv01"].capabilities
+    assert status.battery_inverters == []
 
 
 async def test_meter_purpose_alone_identifies_grid_and_solar(
@@ -122,6 +155,94 @@ async def test_meters_normalise_units(client: AnodeClient) -> None:
     assert meters["grid1"].export_energy_kwh == pytest.approx(30)
     assert meters["grid1"].voltage_v == pytest.approx(240.1)
     assert meters["solar1"].power_w == -2500
+
+
+async def test_inverters_normalise_units(client: AnodeClient) -> None:
+    """A hybrid inverter's counters become kWh and its battery capacity Wh."""
+    inverter = (await client.get_inverters(HUB_ID))["inv01"]
+    assert inverter.state is InverterState.GENERATING
+    assert inverter.ac_power_w == -800
+    assert inverter.import_energy_kwh == pytest.approx(12)
+    assert inverter.export_energy_kwh == pytest.approx(250)
+    assert inverter.pv_power_w == 1200
+    assert inverter.pv_energy_kwh == pytest.approx(452.63)
+    assert inverter.battery_power_w == 400
+    assert inverter.battery_soc_pct == 80
+    assert inverter.battery_capacity_ah == 173
+    assert inverter.battery_nominal_voltage_v == 51.2
+    assert inverter.battery_energy_capacity_wh == pytest.approx(8857.6)
+    assert inverter.battery_energy_remaining_wh == pytest.approx(7086.08)
+    assert inverter.battery_charge_energy_kwh == pytest.approx(23.14)
+    assert inverter.battery_discharge_energy_kwh == pytest.approx(74.36)
+    assert inverter.temperature_c == pytest.approx(34.1)
+    assert inverter.vendor_fault == 0
+
+
+async def test_inverter_blocks_left_out(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """Whatever the hub leaves out is unknown, never zero, and the rest still reads."""
+    cloud.respond(
+        "GET",
+        INVERTERS,
+        json={
+            "status": True,
+            "inverter": [
+                {
+                    "id": "pv01",
+                    "detailed": {
+                        "state": "COMMS_LOST",
+                        "ac": {"power": {"value": 0, "unit": "W"}},
+                        "pv": {"power": {"value": 0, "unit": "W"}},
+                    },
+                },
+                {
+                    "id": "inv01",
+                    "energy": "reshaped",
+                    "detailed": {
+                        "state": "SOME_FUTURE_STATE",
+                        "battery": {
+                            "soc": {"value": 40, "unit": "%"},
+                            "capacity": {"value": 0, "unit": "Ah", "nominalVoltage": 51.2},
+                        },
+                        "temperature": {"value": 95, "unit": "furlongs"},
+                    },
+                },
+            ],
+        },
+    )
+    readings = await client.get_inverters(HUB_ID)
+    solis = readings["pv01"]
+    assert solis.state is InverterState.COMMS_LOST
+    assert solis.ac_power_w == 0
+    assert solis.import_energy_kwh is None
+    assert solis.battery_soc_pct is None
+    assert solis.temperature_c is None
+
+    hybrid = readings["inv01"]
+    assert hybrid.state is None
+    assert hybrid.ac_power_w is None
+    assert hybrid.export_energy_kwh is None
+    assert hybrid.battery_soc_pct == 40
+    assert hybrid.battery_capacity_ah is None
+    assert hybrid.battery_energy_capacity_wh is None
+    assert hybrid.battery_energy_remaining_wh is None
+    assert hybrid.temperature_c is None
+
+
+async def test_inverter_read_before_any_data(client: AnodeClient, cloud: AnodeCloud) -> None:
+    """The hub refuses the read until it has data, and bad entries are skipped."""
+    cloud.respond("GET", INVERTERS, json={"status": False, "info": "No inverter data yet"})
+    with pytest.raises(AnodeCommandError, match="No inverter data yet"):
+        await client.get_inverters(HUB_ID)
+
+    readings = load_fixture("inverters.json")
+    readings["inverter"].extend([{"detailed": {}}, "not an object"])
+    readings["truncated"] = True
+    cloud.respond("GET", INVERTERS, json=readings)
+    assert set(await client.get_inverters(HUB_ID)) == {"inv01"}
+
+    cloud.respond("GET", INVERTERS, json={"status": True})
+    with pytest.raises(AnodeResponseError):
+        await client.get_inverters(HUB_ID)
 
 
 async def test_kilowatt_power_and_unknown_energy_unit(

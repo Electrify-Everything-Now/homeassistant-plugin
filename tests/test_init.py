@@ -101,13 +101,33 @@ EXPECTED_UNIQUE_IDS = {
         ),
         "rep01_version",
         "rep01_uptime",
+        *(
+            f"inv01_{key}"
+            for key in (
+                "state",
+                "ac_power",
+                "ac_import_energy",
+                "ac_export_energy",
+                "temperature",
+                "fault_code",
+                "pv_power",
+                "pv_energy",
+                "battery_power",
+                "battery_soc",
+                "battery_energy_capacity",
+                "battery_charge_energy",
+                "battery_discharge_energy",
+                "version",
+                "uptime",
+            )
+        ),
     },
     "binary_sensor": {
         f"{HUB_ID}_online",
         f"{HUB_ID}_override_active",
         *(
             f"{device}_online"
-            for device in ("bat01", "bat02", "grid1", "solar1", "ev001", "rep01")
+            for device in ("bat01", "bat02", "grid1", "solar1", "ev001", "rep01", "inv01")
         ),
     },
     "number": {
@@ -124,7 +144,10 @@ EXPECTED_UNIQUE_IDS = {
     # for, so it is the one device with no update entity.
     "update": {
         f"{HUB_ID}_firmware",
-        *(f"{device}_firmware" for device in ("bat01", "bat02", "grid1", "solar1", "rep01")),
+        *(
+            f"{device}_firmware"
+            for device in ("bat01", "bat02", "grid1", "solar1", "rep01", "inv01")
+        ),
     },
 }
 
@@ -194,6 +217,7 @@ async def test_devices(hass: HomeAssistant, init_integration: MockConfigEntry) -
         "solar1": ("Solar", "Meter"),
         "ev001": ("Anode Meter ev001", "Meter"),
         "rep01": ("Anode Repeater rep01", "Repeater"),
+        "inv01": ("GivEnergy", "Inverter"),
     }
     for device_id, (name, model) in expected.items():
         device = registry.async_get_device({(DOMAIN, device_id)})

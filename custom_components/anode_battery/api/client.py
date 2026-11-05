@@ -34,6 +34,7 @@ from .models import (
     DeviceMetadata,
     FirmwareUpdateResult,
     HubStatus,
+    InverterReading,
     LinkCode,
     LinkGrant,
     MeterReading,
@@ -47,6 +48,7 @@ from .models import (
     parse_account_hub,
     parse_batteries,
     parse_device_metadata,
+    parse_inverters,
     parse_meters,
     parse_ota_progress,
     parse_power_limit,
@@ -311,6 +313,10 @@ class AnodeClient:
     async def get_meters(self, hub_id: str) -> dict[str, MeterReading]:
         """Return readings for every meter the hub is using, in one request."""
         return parse_meters(await self._request("GET", f"/device/meter/{_hub(hub_id)}"))
+
+    async def get_inverters(self, hub_id: str) -> dict[str, InverterReading]:
+        """Return readings for every inverter the hub has data for, in one request."""
+        return parse_inverters(await self._request("GET", f"/device/inverter/{_hub(hub_id)}"))
 
     async def get_mode(self, hub_id: str) -> OperatingMode | None:
         """Return the mode the hub is running now, or None if unrecognised."""

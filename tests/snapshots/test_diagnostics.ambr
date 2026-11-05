@@ -79,6 +79,8 @@
         'batteries': dict({
           'bat01': dict({
             'alias': 'Garage battery',
+            'capabilities': list([
+            ]),
             'id': 'bat01',
             'latest_version': '1.3.0',
             'meter_purpose': None,
@@ -92,6 +94,8 @@
           }),
           'bat02': dict({
             'alias': None,
+            'capabilities': list([
+            ]),
             'id': 'bat02',
             'latest_version': '1.3.0',
             'meter_purpose': None,
@@ -105,10 +109,34 @@
           }),
         }),
         'hub_id': 'ehxbt',
+        'inverters': dict({
+          'inv01': dict({
+            'alias': 'GivEnergy',
+            'capabilities': list([
+              'BACKUP',
+              'BATTERY',
+              'DISPATCHABLE',
+              'GRID_CT',
+              'PV',
+            ]),
+            'id': 'inv01',
+            'latest_version': 'v1.0.0',
+            'meter_purpose': None,
+            'meter_type': None,
+            'online': True,
+            'ota_in_progress': False,
+            'ota_queued': False,
+            'update_available': False,
+            'uptime_ms': 12345000,
+            'version': 'v1.0.0',
+          }),
+        }),
         'latest_version': '2.5.0',
         'meters': dict({
           'ev001': dict({
             'alias': None,
+            'capabilities': list([
+            ]),
             'id': 'ev001',
             'latest_version': None,
             'meter_purpose': 'ev',
@@ -122,6 +150,8 @@
           }),
           'grid1': dict({
             'alias': 'Grid',
+            'capabilities': list([
+            ]),
             'id': 'grid1',
             'latest_version': '1.2.0',
             'meter_purpose': 'primary',
@@ -135,6 +165,8 @@
           }),
           'solar1': dict({
             'alias': 'Solar',
+            'capabilities': list([
+            ]),
             'id': 'solar1',
             'latest_version': '1.2.0',
             'meter_purpose': 'solar',
@@ -153,6 +185,8 @@
         'repeaters': dict({
           'rep01': dict({
             'alias': None,
+            'capabilities': list([
+            ]),
             'id': 'rep01',
             'latest_version': 'v0.2.0',
             'meter_purpose': None,
@@ -220,6 +254,32 @@
           }),
         }),
         'batteries_current': True,
+        'energy': dict({
+          'battery_cumulative_charge_energy': 1422.691,
+          'battery_cumulative_discharge_energy': 1130.4279999999999,
+          'grid_export_energy': 30.0,
+          'grid_import_energy': 500.0,
+          'house_energy': 256.73699999999997,
+        }),
+        'inverters': dict({
+          'inv01': dict({
+            'ac_power_w': -800.0,
+            'battery_capacity_ah': 173.0,
+            'battery_charge_energy_kwh': 23.14,
+            'battery_discharge_energy_kwh': 74.36,
+            'battery_nominal_voltage_v': 51.2,
+            'battery_power_w': 400.0,
+            'battery_soc_pct': 80.0,
+            'export_energy_kwh': 250.0,
+            'import_energy_kwh': 12.0,
+            'pv_energy_kwh': 452.63,
+            'pv_power_w': 1200.0,
+            'state': <InverterState.GENERATING: 'GENERATING'>,
+            'temperature_c': 34.1,
+            'vendor_fault': 0,
+          }),
+        }),
+        'inverters_current': True,
         'meters': dict({
           'ev001': dict({
             'current_a': 2.9,
@@ -252,6 +312,7 @@
           'bat02',
           'ev001',
           'grid1',
+          'inv01',
           'solar1',
         ]),
       }),

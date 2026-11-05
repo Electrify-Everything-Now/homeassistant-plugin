@@ -19,7 +19,18 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.anode_battery.const import DOMAIN
 
-from .common import BATTERIES, HUB_ID, METERS, MODE, STATUS, AnodeCloud, load_fixture, refresh, state
+from .common import (
+    BATTERIES,
+    HUB_ID,
+    INVERTERS,
+    METERS,
+    MODE,
+    STATUS,
+    AnodeCloud,
+    load_fixture,
+    refresh,
+    state,
+)
 
 
 def value(hass: HomeAssistant, unique_id: str) -> float:
@@ -57,14 +68,18 @@ async def test_meter_sensors(hass: HomeAssistant, init_integration: MockConfigEn
 
 async def test_hub_totals(hass: HomeAssistant, init_integration: MockConfigEntry) -> None:
     """Hub sensors combine every device."""
-    assert value(hass, f"{HUB_ID}_battery_energy_capacity") == 10838.4
-    assert value(hass, f"{HUB_ID}_battery_energy_remaining") == 6928.8
-    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "64"
+    # 6038.4 + 4800 batteries + 8857.6 inverter battery
+    assert value(hass, f"{HUB_ID}_battery_energy_capacity") == 19696.0
+    # 4528.8 + 2400 batteries + 7086.08 inverter battery
+    assert value(hass, f"{HUB_ID}_battery_energy_remaining") == 14014.9
+    # 14014.88 / 19696.0
+    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "71"
     assert value(hass, f"{HUB_ID}_battery_cumulative_charge_energy") == pytest.approx(1422.691)
     assert value(hass, f"{HUB_ID}_battery_cumulative_discharge_energy") == pytest.approx(1130.428)
-    # 2000 grid - (-2500) solar - (1500 + -500) batteries
-    assert value(hass, f"{HUB_ID}_house_power") == 3500
-    # (500 - 30) grid + (80 - 1) solar + (730.428 - 922.691) + (400 - 500) batteries
+    # 2000 grid - (-2500) solar - (-800) inverter - (1500 + -500) batteries
+    assert value(hass, f"{HUB_ID}_house_power") == 4300
+    # (500 - 30) grid + (80 - 1) solar + (730.428 - 922.691) + (400 - 500)
+    # batteries. The inverter counts from its first reading, so adds nothing yet.
     assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(256.737)
     assert value(hass, f"{HUB_ID}_grid_import_energy") == pytest.approx(500)
     assert value(hass, f"{HUB_ID}_grid_export_energy") == pytest.approx(30)
@@ -119,7 +134,8 @@ async def test_battery_dropout(
     assert value(hass, "bat01_power") == 1500
     assert value(hass, f"{HUB_ID}_battery_cumulative_charge_energy") == pytest.approx(1422.691)
     assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(256.737)
-    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "75"
+    # (4528.8 + 7086.08) / (6038.4 + 8857.6), bat02 left out
+    assert state(hass, "sensor", f"{HUB_ID}_average_soc").state == "78"
 
 
 async def test_failed_battery_read(
@@ -141,9 +157,10 @@ async def test_failed_battery_read(
 async def test_all_telemetry_failing(
     hass: HomeAssistant, init_integration: MockConfigEntry, cloud: AnodeCloud
 ) -> None:
-    """If neither read succeeds every reading is unavailable."""
+    """If no read succeeds every reading is unavailable."""
     cloud.respond("GET", BATTERIES, status=HTTPStatus.BAD_GATEWAY)
     cloud.respond("GET", METERS, status=HTTPStatus.BAD_GATEWAY)
+    cloud.respond("GET", INVERTERS, status=HTTPStatus.BAD_GATEWAY)
     await refresh(hass, init_integration.runtime_data.telemetry)
     assert not init_integration.runtime_data.telemetry.last_update_success
     assert state(hass, "sensor", "grid1_power").state == STATE_UNAVAILABLE
@@ -179,7 +196,7 @@ async def test_house_energy_never_decreases(
     meters[0]["importEnergy"]["value"] = 50_000_000
     cloud.respond("GET", METERS, json=meters)
     await refresh(hass, init_integration.runtime_data.telemetry)
-    # (5000 - 30) + 79 + (730.428 - 2000) + (400 - 500)
+    # 256.737 - (2000 - 922.691) charged + (5000 - 500) imported
     assert value(hass, f"{HUB_ID}_house_energy") == pytest.approx(3679.428)
 
 
@@ -267,13 +284,14 @@ async def test_readings_poll_every_30_seconds(
     init_integration: MockConfigEntry,
     cloud: AnodeCloud,
 ) -> None:
-    """Battery and meter readings are fetched again once 30 seconds pass.
+    """Battery, meter and inverter readings are fetched again once 30 seconds pass.
 
     Time is frozen before setup (via frozen_time) so the coordinator's timer
     is scheduled on the same clock the test advances.
     """
     batteries_before = len(cloud.calls("GET", BATTERIES))
     meters_before = len(cloud.calls("GET", METERS))
+    inverters_before = len(cloud.calls("GET", INVERTERS))
 
     freezer.tick(timedelta(seconds=29))
     async_fire_time_changed(hass)
@@ -285,3 +303,4 @@ async def test_readings_poll_every_30_seconds(
     await hass.async_block_till_done()
     assert len(cloud.calls("GET", BATTERIES)) == batteries_before + 1
     assert len(cloud.calls("GET", METERS)) == meters_before + 1
+    assert len(cloud.calls("GET", INVERTERS)) == inverters_before + 1

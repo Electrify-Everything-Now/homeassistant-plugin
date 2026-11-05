@@ -6,6 +6,7 @@
     { "friendlyId": "bat02", "alias": null, "meterPurpose": null },
     { "friendlyId": "grid1", "alias": "Grid", "meterPurpose": "primary" },
     { "friendlyId": "solar1", "alias": "Solar", "meterPurpose": "solar" },
-    { "friendlyId": "ev001", "alias": null, "meterPurpose": "ev" }
+    { "friendlyId": "ev001", "alias": null, "meterPurpose": "ev" },
+    { "friendlyId": "inv01", "alias": "GivEnergy", "meterPurpose": null }
   ]
 }

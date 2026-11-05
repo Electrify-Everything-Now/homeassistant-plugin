@@ -217,13 +217,24 @@ The hub's grid sensors keep working if the grid meter is replaced or a second on
 
 Use the lifetime sensors here, not the **… today** sensors: the Energy dashboard calculates daily, weekly and monthly totals itself.
 
+### Hub energy totals
+
+The hub's **Grid import energy**, **Grid export energy**, **House energy**, **Battery charge energy** and **Battery discharge energy** go up by how far each device's lifetime counter moved since the last reading, rather than adding the counters up. So:
+
+- A meter, battery or inverter paired later counts from its first reading. That includes an inverter paired before this version added inverters: **House energy** counts it from the first reading after you update.
+- A device that is removed keeps what it counted.
+- A counter that resets carries on counting from its new value.
+- The totals are stored in Home Assistant, so energy used while it is stopped counts when it starts again.
+
+**House energy** is a net figure. If it would ever go down, the sensor holds its last value until it catches up.
+
 ### Energy today
 
 Each hub lifetime total has a **today** version for dashboards and automations: grid import, grid export, house, battery charge and battery discharge.
 
 - They return to 0 at midnight in Home Assistant's time zone.
 - Energy used while Home Assistant is stopped still counts, towards the day it starts again.
-- If a lifetime total drops, for example after a meter or battery is replaced, today's figure keeps its value and carries on counting.
+- Pairing, removing or replacing a device does not make them jump. See [Hub energy totals](#hub-energy-totals).
 - They are unavailable while readings cannot be fetched, and pick up where they left off afterwards.
 
 ## Overriding the schedule
@@ -322,7 +333,7 @@ Entity IDs and history carry over. Changes you may notice:
 - **Override active is inferred.** The Anode API does not report overrides, so the integration compares the running mode with the schedule. Octopus smart-charging dispatches also show as overrides.
 - The schedule is read in Home Assistant's time zone. If the hub uses a different time zone, **Next mode change** is wrong by the difference.
 - Everything goes through the Anode cloud, so the integration needs internet access, and commands take a few seconds to reach the hub.
-- **House energy**, **Grid import/export energy** and **Battery charge/discharge energy** on the hub are calculated from lifetime counters. If a calculation comes out lower than before, for example after a meter or battery is replaced, the sensor holds its last value until the calculation catches up rather than going backwards.
+- The [hub energy totals](#hub-energy-totals) only see a device's counters when they are read. If a device is removed, or its counter resets, while Home Assistant is stopped or readings are failing, the energy it counted since the last reading is not added.
 
 ## Troubleshooting
 

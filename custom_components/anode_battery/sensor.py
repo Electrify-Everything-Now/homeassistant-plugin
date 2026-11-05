@@ -32,7 +32,16 @@ from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
-from .api import BatteryReading, HubStatus, MeterReading, OperatingMode, SubDevice
+from .api import (
+    BatteryReading,
+    HubStatus,
+    InverterCapability,
+    InverterReading,
+    InverterState,
+    MeterReading,
+    OperatingMode,
+    SubDevice,
+)
 from .const import ENERGY_DROP_TOLERANCE_KWH
 from .coordinator import (
     AnodeConfigEntry,
@@ -50,11 +59,18 @@ _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 0
 
 _MODES = [mode.value for mode in OperatingMode]
+_INVERTER_STATES = [state.lower() for state in InverterState if state is not InverterState.UNKNOWN]
 UNIT_AMP_HOUR = "Ah"
 
 
 def _round(value: float | None, digits: int) -> float | None:
     return None if value is None else round(value, digits)
+
+
+def _inverter_state(reading: InverterReading) -> str | None:
+    if reading.state is None or reading.state is InverterState.UNKNOWN:
+        return None
+    return reading.state.lower()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -101,6 +117,15 @@ class AnodeMeterSensorDescription(SensorEntityDescription):
     """A meter sensor read from telemetry."""
 
     value_fn: Callable[[MeterReading], StateType]
+
+
+@dataclass(frozen=True, kw_only=True)
+class AnodeInverterSensorDescription(SensorEntityDescription):
+    """An inverter sensor read from telemetry."""
+
+    value_fn: Callable[[InverterReading], StateType]
+    #: Created only for an inverter whose status lists this capability.
+    capability: InverterCapability | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -436,6 +461,117 @@ REPEATER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
 INVERTER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
     _FIRMWARE_VERSION,
     _SUB_DEVICE_UPTIME,
+)
+
+INVERTER_SENSORS: tuple[AnodeInverterSensorDescription, ...] = (
+    AnodeInverterSensorDescription(
+        key="state",
+        translation_key="inverter_state",
+        device_class=SensorDeviceClass.ENUM,
+        options=_INVERTER_STATES,
+        value_fn=_inverter_state,
+    ),
+    AnodeInverterSensorDescription(
+        key="ac_power",
+        translation_key="inverter_ac_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda i: i.ac_power_w,
+    ),
+    AnodeInverterSensorDescription(
+        key="ac_import_energy",
+        translation_key="inverter_ac_import_energy",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=lambda i: _round(i.import_energy_kwh, 4),
+    ),
+    AnodeInverterSensorDescription(
+        key="ac_export_energy",
+        translation_key="inverter_ac_export_energy",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=lambda i: _round(i.export_energy_kwh, 4),
+    ),
+    AnodeInverterSensorDescription(
+        key="temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_display_precision=1,
+        value_fn=lambda i: i.temperature_c,
+    ),
+    AnodeInverterSensorDescription(
+        key="fault_code",
+        translation_key="inverter_fault_code",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda i: i.vendor_fault,
+    ),
+    AnodeInverterSensorDescription(
+        key="pv_power",
+        translation_key="inverter_pv_power",
+        capability=InverterCapability.PV,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda i: i.pv_power_w,
+    ),
+    AnodeInverterSensorDescription(
+        key="pv_energy",
+        translation_key="inverter_pv_energy",
+        capability=InverterCapability.PV,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=lambda i: _round(i.pv_energy_kwh, 4),
+    ),
+    AnodeInverterSensorDescription(
+        key="battery_power",
+        translation_key="inverter_battery_power",
+        capability=InverterCapability.BATTERY,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda i: i.battery_power_w,
+    ),
+    AnodeInverterSensorDescription(
+        key="battery_soc",
+        translation_key="inverter_battery_soc",
+        capability=InverterCapability.BATTERY,
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda i: None if i.battery_soc_pct is None else round(i.battery_soc_pct),
+    ),
+    AnodeInverterSensorDescription(
+        key="battery_energy_capacity",
+        translation_key="inverter_battery_energy_capacity",
+        capability=InverterCapability.BATTERY,
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        value_fn=lambda i: _round(i.battery_energy_capacity_wh, 1),
+    ),
+    AnodeInverterSensorDescription(
+        key="battery_charge_energy",
+        translation_key="inverter_battery_charge_energy",
+        capability=InverterCapability.BATTERY,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=lambda i: _round(i.battery_charge_energy_kwh, 4),
+    ),
+    AnodeInverterSensorDescription(
+        key="battery_discharge_energy",
+        translation_key="inverter_battery_discharge_energy",
+        capability=InverterCapability.BATTERY,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=lambda i: _round(i.battery_discharge_energy_kwh, 4),
+    ),
 )
 
 METER_STATUS_SENSORS: tuple[AnodeSubDeviceSensorDescription, ...] = (
@@ -861,6 +997,12 @@ async def async_setup_entry(
                 if description.exists_fn(repeater):
                     yield AnodeSubDeviceSensor(runtime.status, repeater.id, description)
         for inverter in status.inverters.values():
+            for description in INVERTER_SENSORS:
+                if (
+                    description.capability is None
+                    or description.capability in inverter.capabilities
+                ):
+                    yield AnodeInverterSensor(runtime.telemetry, inverter.id, description)
             for description in INVERTER_STATUS_SENSORS:
                 if description.exists_fn(inverter):
                     yield AnodeSubDeviceSensor(runtime.status, inverter.id, description)
@@ -1025,6 +1167,30 @@ class AnodeMeterSensor(AnodeEntity[AnodeTelemetryCoordinator], SensorEntity):
     @property
     def native_value(self) -> StateType:
         reading = self.coordinator.data.meters.get(self._device_id)
+        return self.entity_description.value_fn(reading) if reading else None
+
+
+class AnodeInverterSensor(AnodeEntity[AnodeTelemetryCoordinator], SensorEntity):
+    """Inverter sensor read from telemetry."""
+
+    entity_description: AnodeInverterSensorDescription
+
+    def __init__(
+        self,
+        coordinator: AnodeTelemetryCoordinator,
+        inverter_id: str,
+        description: AnodeInverterSensorDescription,
+    ) -> None:
+        super().__init__(coordinator, inverter_id, description.key)
+        self.entity_description = description
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.coordinator.data.is_current(self._device_id)
+
+    @property
+    def native_value(self) -> StateType:
+        reading = self.coordinator.data.inverters.get(self._device_id)
         return self.entity_description.value_fn(reading) if reading else None
 
 

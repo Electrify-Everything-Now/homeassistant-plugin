@@ -137,6 +137,39 @@
       },
       "meter_type": {
         "default": "mdi:label-outline"
+      },
+      "inverter_state": {
+        "default": "mdi:solar-power-variant"
+      },
+      "inverter_ac_power": {
+        "default": "mdi:sine-wave"
+      },
+      "inverter_ac_import_energy": {
+        "default": "mdi:home-import-outline"
+      },
+      "inverter_ac_export_energy": {
+        "default": "mdi:home-export-outline"
+      },
+      "inverter_pv_power": {
+        "default": "mdi:solar-power"
+      },
+      "inverter_pv_energy": {
+        "default": "mdi:solar-power"
+      },
+      "inverter_battery_power": {
+        "default": "mdi:home-battery"
+      },
+      "inverter_battery_energy_capacity": {
+        "default": "mdi:battery-heart-variant"
+      },
+      "inverter_battery_charge_energy": {
+        "default": "mdi:battery-charging"
+      },
+      "inverter_battery_discharge_energy": {
+        "default": "mdi:battery-minus"
+      },
+      "inverter_fault_code": {
+        "default": "mdi:alert-circle-outline"
       }
     },
     "update": {

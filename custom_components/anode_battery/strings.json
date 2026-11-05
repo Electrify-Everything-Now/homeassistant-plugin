@@ -281,6 +281,48 @@
       },
       "cell_voltage": {
         "name": "Cell {cell} voltage"
+      },
+      "inverter_state": {
+        "name": "State",
+        "state": {
+          "generating": "Generating",
+          "standby": "Standby",
+          "fault": "Fault",
+          "comms_lost": "Communication lost"
+        }
+      },
+      "inverter_ac_power": {
+        "name": "AC power"
+      },
+      "inverter_ac_import_energy": {
+        "name": "AC import energy"
+      },
+      "inverter_ac_export_energy": {
+        "name": "AC export energy"
+      },
+      "inverter_pv_power": {
+        "name": "PV power"
+      },
+      "inverter_pv_energy": {
+        "name": "PV energy"
+      },
+      "inverter_battery_power": {
+        "name": "Battery power"
+      },
+      "inverter_battery_soc": {
+        "name": "Battery state of charge"
+      },
+      "inverter_battery_energy_capacity": {
+        "name": "Battery energy capacity"
+      },
+      "inverter_battery_charge_energy": {
+        "name": "Battery charge energy"
+      },
+      "inverter_battery_discharge_energy": {
+        "name": "Battery discharge energy"
+      },
+      "inverter_fault_code": {
+        "name": "Fault code"
       }
     },
     "update": {

@@ -101,8 +101,26 @@ EXPECTED_UNIQUE_IDS = {
         ),
         "rep01_version",
         "rep01_uptime",
-        "inv01_version",
-        "inv01_uptime",
+        *(
+            f"inv01_{key}"
+            for key in (
+                "state",
+                "ac_power",
+                "ac_import_energy",
+                "ac_export_energy",
+                "temperature",
+                "fault_code",
+                "pv_power",
+                "pv_energy",
+                "battery_power",
+                "battery_soc",
+                "battery_energy_capacity",
+                "battery_charge_energy",
+                "battery_discharge_energy",
+                "version",
+                "uptime",
+            )
+        ),
     },
     "binary_sensor": {
         f"{HUB_ID}_online",
